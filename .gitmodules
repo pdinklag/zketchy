@@ -1,0 +1,9 @@
+[submodule "extlib/iopp"]
+	path = extlib/iopp
+	url = https://github.com/pdinklag/iopp.git
+[submodule "extlib/fp"]
+	path = extlib/fp
+	url = https://github.com/pdinklag/fp.git
+[submodule "extlib/oocmd"]
+	path = extlib/oocmd
+	url = https://github.com/pdinklag/oocmd.git
