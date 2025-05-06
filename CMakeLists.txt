@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.5.0 FATAL_ERROR)
 project(zketchy)
 
+# options
+option(BENCHMARK "Compile performance benchmarking and statistics output" OFF)
+
 # include CMake modules
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmakemodules")
 
@@ -17,6 +20,10 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELEASE} -g")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -march=native")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+
+if(${BENCHMARK})
+    add_compile_definitions(BENCHMARK)
+endif()
 
 # init git submodules
 include(InitGitSubmodules)

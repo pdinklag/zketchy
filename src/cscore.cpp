@@ -1,5 +1,6 @@
 #include <cscore.hpp>
 
+#include <internal/benchmark.hpp>
 #include <internal/hashing/min_hash.hpp>
 #include <internal/util/idiv_ceil.hpp>
 
@@ -52,8 +53,19 @@ double all_to_all_similarity(std::vector<Sig> const& signatures) {
     return score;
 }
 
-double zk::cscore(iopp::FileInputStream& in, size_t const pattern_len, size_t const sampling_exp, size_t const block_size, size_t const buffer_size)
-{
+double zk::cscore(iopp::FileInputStream& in, size_t const pattern_len, size_t const sampling_exp, size_t const block_size, size_t const buffer_size) {
+    internal::Result r;
+    r.add("algo", "cscore");
+    r.add("len", pattern_len);
+    r.add("s", sampling_exp);
+    r.add("block_size", block_size);
+    r.add("buffer_size", buffer_size);
+
+    internal::MemoryTimePhase phase_all;
+    internal::TimePhase phase_signatures, phase_similarity;
+    phase_all.start();
+    phase_signatures.start();
+
     RK rk(rolling_fp_base, pattern_len);
     size_t const num_threads = omp_get_max_threads();
 
@@ -111,5 +123,21 @@ double zk::cscore(iopp::FileInputStream& in, size_t const pattern_len, size_t co
             }
         }
     }
-    return all_to_all_similarity(block_signatures);
+    phase_signatures.stop();
+
+    phase_similarity.start();
+    double const score = all_to_all_similarity(block_signatures);
+    phase_similarity.stop();
+
+    phase_all.stop();
+
+    r.add("score", score);
+    r.add("t", phase_all.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
+    r.add("t_sig", phase_signatures.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
+    r.add("t_score", phase_similarity.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
+    r.add("mem_peak", phase_all.get_metric<pm::MallocCounter::MemoryPeakMetric>());
+    r.sort();
+    r.print();
+
+    return score;
 }
