@@ -7,3 +7,6 @@
 [submodule "extlib/oocmd"]
 	path = extlib/oocmd
 	url = https://github.com/pdinklag/oocmd.git
+[submodule "extlib/pm"]
+	path = extlib/pm
+	url = https://github.com/pdinklag/pm.git
