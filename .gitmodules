@@ -13,3 +13,6 @@
 [submodule "extlib/word-packing"]
 	path = extlib/word-packing
 	url = https://github.com/pdinklag/word-packing.git
+[submodule "extlib/lz77"]
+	path = extlib/lz77
+	url = https://github.com/pdinklag/lz77
