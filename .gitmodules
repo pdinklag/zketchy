@@ -10,3 +10,6 @@
 [submodule "extlib/pm"]
 	path = extlib/pm
 	url = https://github.com/pdinklag/pm.git
+[submodule "extlib/word-packing"]
+	path = extlib/word-packing
+	url = https://github.com/pdinklag/word-packing.git
