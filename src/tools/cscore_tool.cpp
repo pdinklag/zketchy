@@ -1,6 +1,6 @@
-#include <cscore.hpp>
-#include <oocmd.hpp>
+#include <zk/cscore.hpp>
 
+#include <oocmd.hpp>
 #include <iopp/file_input_stream.hpp>
 
 class CScoreTool : public oocmd::ConfigObject {
