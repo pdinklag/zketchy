@@ -299,7 +299,8 @@ public:
                     phase_parse.data()["bloom_lookups"] = cht_round_stats.bloom_lookups;
                     phase_parse.data()["map_lookups"] = cht_round_stats.map_lookups;
                     phase_parse.data()["false_positives"] = cht_round_stats.false_positives;
-                    phase_parse.data()["false_positive_rate"] = double(cht_round_stats.false_positives) / double(cht_round_stats.bloom_lookups);
+                    phase_parse.data()["bloom_fpr"] = double(cht_round_stats.false_positives) / double(cht_round_stats.bloom_lookups);
+                    phase_parse.data()["bloom_load_factor"] = double(bloom.count_set_bits()) / double(bloom.size());
                     cht_total_stats += cht_round_stats;
                 }
                 
