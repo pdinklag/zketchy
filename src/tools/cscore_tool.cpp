@@ -1,10 +1,7 @@
 #include <cscore.hpp>
 #include <oocmd.hpp>
 
-#include <internal/util/si_iec_literals.hpp>
 #include <iopp/file_input_stream.hpp>
-
-#include <iostream>
 
 class CScoreTool : public oocmd::ConfigObject {
 private:
@@ -35,7 +32,16 @@ public:
 
             iopp::FileInputStream fis(filename, 0, n);
 
-            double const score = zk::cscore(fis, len, sampling, block_size, buffer_size);
+            zk::CScore cscore(len, sampling, block_size, buffer_size);
+            double const score = cscore.compute(fis);
+
+            auto result = cscore.consume_last_result();
+            result.add("algo", "cscore");
+            result.add("file", std::filesystem::path(filename).filename().string());
+            result.add("n", n);
+            result.sort();
+            result.print();
+
             std::cout << score << std::endl;
             return 0;
         } else {
