@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bit>
 #include <execution>
 #include <tuple>
 #include <vector>
@@ -15,6 +16,7 @@
 
 #include "internal/benchmark.hpp"
 #include "internal/io/overlapping_blocks.hpp"
+#include "internal/io/vbyte_coding.hpp"
 #include "internal/hashing/bloom_filter.hpp"
 #include "internal/util/idiv_ceil.hpp"
 #include "internal/util/si_iec_literals.hpp"
@@ -94,11 +96,11 @@ public:
     PSampLZ(PSampLZ const&) = default;
     PSampLZ& operator=(PSampLZ const&) = default;
 
-    template<iopp::STLInputStreamLike InputStream>
+    template<iopp::STLInputStreamLike InputStream, iopp::STLOutputStreamLike OutputStream>
     requires requires(InputStream& subject, size_t const offs, std::ios_base::seekdir const dir){
         { subject.seekg(offs, dir) };
     }
-    void compress(InputStream& in, size_t const n) {
+    void compress(InputStream& in, size_t const n, OutputStream& out) {
         result_ = {};
         CHTLookupStats cht_total_stats;
 
@@ -328,7 +330,62 @@ public:
             stats_.append_child(phase_sample_and_parse);
         }
 
-        // TODO: encode
+        // encode
+        internal::TimePhase phase_encode("encode");
+        phase_encode.start();
+
+        in.seekg(0, std::ios_base::beg);
+        size_t z = 0;
+        size_t nout = 0;
+        {
+            auto encode_ref = [&](LZRef2At const& ref){
+                ++z;
+                nout += internal::encode_vbyte(out, ref.lxp);
+                nout += internal::encode_vbyte(out, ref.src);
+            };
+        
+            auto copy_char = [&](){
+                ++z;
+                ++nout;
+
+                out.put(in.get());
+                return true;
+            };
+
+            // magic
+            for(auto c : std::string("psamplz:")) {
+                out.put(c);
+                ++nout;
+            }
+
+            auto it = refs.begin();
+            auto const end = refs.end();
+            size_t i = 0;
+            for(; it != end; it++) {
+                // number of characters until next reference
+                nout += internal::encode_vbyte(out, it->pos - i);
+
+                // copy characters up until beginning of the next reference
+                while(i++ < it->pos) copy_char();
+        
+                // encode ref
+                encode_ref(*it);
+                i = it->end();
+        
+                // skip characters in input
+                for(size_t j = 0; j < it->len(); j++) in.get();
+            }
+        
+            // copy remaining characters
+            nout += internal::encode_vbyte(out, n - i);
+
+            for(; i < n; i++) {
+                copy_char();
+            }
+        }
+
+        phase_encode.stop();
+        stats_.append_child(phase_encode);
 
         stats_.stop();
 
@@ -341,6 +398,8 @@ public:
         result_.add("refs", refs.size());
         result_.add("t", stats_.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
         result_.add("mem_peak", stats_.get_metric<pm::MallocCounter::MemoryPeakMetric>());
+        result_.add("z", z);
+        result_.add("nout", nout);
     }
 
     auto&& consume_last_result() {

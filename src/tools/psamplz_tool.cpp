@@ -2,6 +2,7 @@
 
 #include <oocmd.hpp>
 #include <iopp/file_input_stream.hpp>
+#include <iopp/file_output_stream.hpp>
 
 class PSampLZTool : public oocmd::ConfigObject {
 private:
@@ -29,10 +30,16 @@ public:
             auto const& filename = app.args()[0];
             size_t const n = std::min(std::filesystem::file_size(filename), prefix);
 
-            iopp::FileInputStream fis(filename, 0, n);
+            if(output_filename.empty()) {
+                output_filename = filename + ".psamplz";
+            }
 
             zk::PSampLZ psamplz(len_exp_min, len_exp_max, sampling, bloom_filter_scale, window_size);
-            psamplz.compress(fis, n);
+            {
+                iopp::FileInputStream in(filename, 0, n);
+                iopp::FileOutputStream out(output_filename);
+                psamplz.compress(in, n, out);
+            }
 
             auto stats = psamplz.consume_last_stats();
             std::cout << stats.gather_data().dump(4) << std::endl;
