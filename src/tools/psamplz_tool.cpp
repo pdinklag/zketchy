@@ -13,9 +13,11 @@ private:
     uint64_t sampling = 4;
     size_t bloom_filter_scale = 6;
     size_t prefix = SIZE_MAX;
+    bool decompress = false;
 
 public:
     PSampLZTool() : oocmd::ConfigObject("Compressibility score", "Quickly estimate how compressible the input is") {
+        param('d', "decompress", decompress, "Decompress the input.");
         param('o', "out", output_filename, "The output file.");
         param("min", len_exp_min, "The minimum pattern length (2^value).");
         param("max", len_exp_max, "The maximum pattern length (2^value).");
@@ -28,29 +30,45 @@ public:
     int run(oocmd::Application const& app) {
         if(!app.args().empty()) {
             auto const& filename = app.args()[0];
-            size_t const n = std::min(std::filesystem::file_size(filename), prefix);
+            if(decompress) {
+                iopp::FileInputStream in(filename, 0);
+                auto s = zk::PSampLZ::decompress(in);
 
-            if(output_filename.empty()) {
-                output_filename = filename + ".psamplz";
+                if(s.empty()) {
+                    std::cerr << "ill-formed input" << std::endl;
+                    return -1;
+                } else {
+                    if(output_filename.empty()) {
+                        output_filename = filename + ".dec";
+                    }
+
+                    iopp::FileOutputStream out(output_filename);
+                    out.write(s.data(), s.length());
+                }
+            } else {
+                size_t const n = std::min(std::filesystem::file_size(filename), prefix);
+
+                if(output_filename.empty()) {
+                    output_filename = filename + ".psamplz";
+                }
+
+                zk::PSampLZ psamplz(len_exp_min, len_exp_max, sampling, bloom_filter_scale, window_size);
+                {
+                    iopp::FileInputStream in(filename, 0, n);
+                    iopp::FileOutputStream out(output_filename);
+                    psamplz.compress(in, n, out);
+                }
+
+                auto stats = psamplz.consume_last_stats();
+                std::cout << stats.gather_data().dump(4) << std::endl;
+
+                auto result = psamplz.consume_last_result();
+                result.add("algo", "psamplz");
+                result.add("file", std::filesystem::path(filename).filename().string());
+                result.add("n", n);
+                result.sort();
+                result.print();
             }
-
-            zk::PSampLZ psamplz(len_exp_min, len_exp_max, sampling, bloom_filter_scale, window_size);
-            {
-                iopp::FileInputStream in(filename, 0, n);
-                iopp::FileOutputStream out(output_filename);
-                psamplz.compress(in, n, out);
-            }
-
-            auto stats = psamplz.consume_last_stats();
-            std::cout << stats.gather_data().dump(4) << std::endl;
-
-            auto result = psamplz.consume_last_result();
-            result.add("algo", "psamplz");
-            result.add("file", std::filesystem::path(filename).filename().string());
-            result.add("n", n);
-            result.sort();
-            result.print();
-
             return 0;
         } else {
             app.print_usage(*this);

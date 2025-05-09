@@ -25,6 +25,47 @@ namespace zk {
 
 class PSampLZ {
 private:
+    static constexpr std::string MAGIC = "psamplz";
+
+public:
+    template<iopp::STLInputStreamLike InputStream>
+    static std::string decompress(InputStream& in) {
+        std::string s(MAGIC.length(), 0);
+
+        in.read(s.data(), MAGIC.length());
+        if(s != MAGIC) {
+            return "";
+        }
+        s.clear();
+
+        size_t i = 0;
+        while(in.good()) {
+            auto const num_literals = internal::decode_vbyte(in);
+            if(!in.good()) break;
+
+            for(size_t i = 0; i < num_literals; i++) {
+                s.push_back(in.get());
+            }
+            i += num_literals;
+
+            if(in.good()) {
+                auto const lxp = internal::decode_vbyte(in);
+                if(!in.good()) break;
+
+                auto const src = internal::decode_vbyte(in);
+
+                size_t const len = 1ULL << lxp;
+                for(size_t i = 0; i < len; i++) {
+                    s.push_back(s[src + i]);
+                }
+                i += len;
+            }
+        }
+
+        return s;
+    }
+
+private:
     using RK = fp::RabinKarp61;
     using Fingerprint = RK::Fingerprint;
 
@@ -240,7 +281,7 @@ public:
                         {
                             size_t const thread_num = omp_get_thread_num();
                             auto [beg, end, fp] = init_fingerprinting(thread_num, num_per_thread);
-                            auto& refs = *lrefs[thread_num];
+                            auto& new_lrefs = *lrefs[thread_num];
                             auto& cht_stats = *lcht_stats[thread_num];
 
                             // process portion
@@ -248,7 +289,7 @@ public:
 
                             size_t next_ref = 0; // the next relevant reference
                             size_t next_possible_ref_pos = 0;
-                            // TODO: find initial value of next via binary search 
+                            // TODO: find initial value of next_ref via binary search 
 
                             ssize_t i = block.offset() + (beg - block.begin()) - ssize_t(len) + 1;
 
@@ -260,6 +301,7 @@ public:
 
                                 // possibly advance next reference
                                 while(next_ref < refs.size() && i >= refs[next_ref].end()) {
+                                    next_possible_ref_pos = refs[next_ref].end();
                                     ++next_ref;
                                 }
 
@@ -274,7 +316,7 @@ public:
                                     if(it != growt_handle.end()) {
                                         auto const j = (*it).second;
                                         if(i > ssize_t(j)) {
-                                            refs.push_back(LZRef2At{j, len_exp_min_ + l, size_t(i)});
+                                            new_lrefs.push_back(LZRef2At{j, len_exp_min_ + l, size_t(i)});
                                             next_possible_ref_pos = i + len;
                                         }
                                     } else {
@@ -331,61 +373,55 @@ public:
         }
 
         // encode
-        internal::TimePhase phase_encode("encode");
-        phase_encode.start();
-
-        in.seekg(0, std::ios_base::beg);
         size_t z = 0;
         size_t nout = 0;
         {
-            auto encode_ref = [&](LZRef2At const& ref){
-                ++z;
-                nout += internal::encode_vbyte(out, ref.lxp);
-                nout += internal::encode_vbyte(out, ref.src);
-            };
-        
-            auto copy_char = [&](){
-                ++z;
-                ++nout;
+            internal::TimePhase phase_encode("encode");
+            phase_encode.start();
 
-                out.put(in.get());
-                return true;
-            };
+            in.seekg(0, std::ios_base::beg);
+            {
+                // magic
+                out.write(MAGIC.data(), MAGIC.length());
+                nout += MAGIC.length();
 
-            // magic
-            for(auto c : std::string("psamplz:")) {
-                out.put(c);
-                ++nout;
+                size_t i = 0;
+
+                auto copy_literals = [&](size_t const num_literals){
+                    nout += internal::encode_vbyte(out, num_literals);
+                    
+                    for(size_t j = 0; j < num_literals; j++) {
+                        out.put(in.get());
+                    }
+
+                    z += num_literals;
+                    nout += num_literals;
+                    i += num_literals;
+                };
+                
+                for(auto it = refs.begin(); it != refs.end(); it++) {
+                    // copy literals up to next reference
+                    copy_literals(it->pos - i);
+
+                    // encode reference
+                    ++z;
+                    nout += internal::encode_vbyte(out, it->lxp);
+                    nout += internal::encode_vbyte(out, it->src);
+                    
+                    // skip literals replaced by reference
+                    i += it->len();
+                    in.seekg(it->len(), std::ios_base::cur);
+                }
+
+                // copy remaining literals
+                if(i < n) {
+                    copy_literals(n - i);
+                }
             }
 
-            auto it = refs.begin();
-            auto const end = refs.end();
-            size_t i = 0;
-            for(; it != end; it++) {
-                // number of characters until next reference
-                nout += internal::encode_vbyte(out, it->pos - i);
-
-                // copy characters up until beginning of the next reference
-                while(i++ < it->pos) copy_char();
-        
-                // encode ref
-                encode_ref(*it);
-                i = it->end();
-        
-                // skip characters in input
-                for(size_t j = 0; j < it->len(); j++) in.get();
-            }
-        
-            // copy remaining characters
-            nout += internal::encode_vbyte(out, n - i);
-
-            for(; i < n; i++) {
-                copy_char();
-            }
+            phase_encode.stop();
+            stats_.append_child(phase_encode);
         }
-
-        phase_encode.stop();
-        stats_.append_child(phase_encode);
 
         stats_.stop();
 
