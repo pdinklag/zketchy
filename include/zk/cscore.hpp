@@ -1,7 +1,7 @@
 #pragma once
 
 #include "internal/benchmark.hpp"
-#include "internal/hashing/min_hash.hpp"
+#include "internal/sketch/min_hash.hpp"
 #include "internal/util/idiv_ceil.hpp"
 #include "internal/util/si_iec_literals.hpp"
 

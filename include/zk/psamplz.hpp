@@ -17,7 +17,7 @@
 #include "internal/benchmark.hpp"
 #include "internal/io/overlapping_blocks.hpp"
 #include "internal/io/vbyte_coding.hpp"
-#include "internal/hashing/bloom_filter.hpp"
+#include "internal/sketch/bloom_filter.hpp"
 #include "internal/util/idiv_ceil.hpp"
 #include "internal/util/si_iec_literals.hpp"
 
