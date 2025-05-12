@@ -16,3 +16,6 @@
 [submodule "extlib/lz77"]
 	path = extlib/lz77
 	url = https://github.com/pdinklag/lz77
+[submodule "extlib/code"]
+	path = extlib/code
+	url = https://github.com/pdinklag/code.git
