@@ -34,8 +34,13 @@ public:
         if(!app.args().empty()) {
             auto const& filename = app.args()[0];
             if(decompress) {
-                
+                if(output_filename.empty()) {
+                    output_filename = filename + ".dec";
+                }
 
+                iopp::FileInputStream in(filename);
+                iopp::FileOutputStream out(output_filename);
+                zk::TopkLZ77::decompress(iopp::bitwise_input_from(in), out);
             } else {
                 size_t const n = std::min(std::filesystem::file_size(filename), prefix);
 

@@ -254,6 +254,89 @@ public:
         result_.add("mem_peak", stats.get_metric<pm::MallocCounter::MemoryPeakMetric>());
     }
 
+    template<iopp::BitSource In, iopp::STLOutputStreamLike OutputStream>
+    static void decompress(In in, OutputStream& out) {
+        // decode header
+        uint64_t const magic = in.read(64);
+        if(magic != MAGIC) {
+            std::cerr << "wrong magic: 0x" << std::hex << magic << " (expected: 0x" << MAGIC << ")" << std::endl;
+            std::abort();
+        }
+
+        auto const k = in.read(64);
+        auto const window_size = in.read(64);
+        auto const max_freq = in.read(64);
+
+        // initialize decoding
+        internal::BlockDecoder dec(in);
+        setup_encoding(dec, k, window_size);
+        Topk topk(k - 1, max_freq);
+        
+        auto block = std::make_unique<char[]>(window_size);
+        auto block_offs = 0;
+        size_t curpos = 0;
+
+        while(in) {
+            if(block_offs == 10485760) {
+                block_offs = 10485760;
+            }
+
+            auto const len = dec.read_uint(TOK_FACT_LEN);
+            size_t phrase_len;
+
+            auto const gpos = block_offs + curpos;
+            if(len == 0) {
+                // a top-k trie reference
+                auto const node = dec.read_uint(TOK_TRIE_REF);
+                phrase_len = topk.get(node, block.get() + curpos);
+            } else if(len == 1) {
+                // a literal character
+                auto const c = dec.read_char(TOK_LITERAL);
+                block[curpos] = c;
+                phrase_len = 1;
+            } else {
+                phrase_len = len;
+
+                // a block-local LZ77 reference
+                if(len == MAX_LZ_REF_LEN) {
+                    // this factor may be even longer, decode remainder
+                    phrase_len += dec.read_uint(TOK_FACT_REMAINDER);
+                }
+
+                auto const src = dec.read_uint(TOK_FACT_SRC);
+                assert(curpos >= src);
+                auto const srcpos = curpos - src;
+                for(size_t i = 0; i < phrase_len; i++) {
+                    block[curpos + i] = block[srcpos + i];
+                }
+            }
+
+            // enter string into top-k structure
+            {
+                typename Topk::StringState s = topk.empty_string();
+                Node node;
+                while(s.frequent && s.len < phrase_len) {
+                    assert(curpos + s.len < window_size);
+                    node = s.node;
+                    s = topk.extend(s, block[curpos + s.len]);
+                }
+            }
+
+            // advance
+            curpos += phrase_len;
+
+            if(curpos >= window_size) {
+                // emit and advance to new block
+                out.write(block.get(), window_size);
+                curpos = 0;
+                block_offs += window_size;
+            }
+        }
+
+        // emit final block
+        out.write(block.get(), curpos);
+    }
+
     auto&& consume_last_result() {
         return std::move(result_);
     }
