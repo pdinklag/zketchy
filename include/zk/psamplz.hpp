@@ -385,9 +385,11 @@ public:
     PSampLZ(PSampLZ const&) = default;
     PSampLZ& operator=(PSampLZ const&) = default;
 
-    template<std::output_iterator<lz77::Factor> Output>
-    void factorize(std::string_view const& s, Output& out) {
+    template<std::contiguous_iterator Input, std::output_iterator<lz77::Factor> Output>
+    requires (sizeof(std::iter_value_t<Input>) == 1)
+    void factorize(Input begin, Input const& end, Output out) {
         // parse
+        std::string_view s(begin, end);
         size_t const n = s.size();
         std::ispanstream in(s);
         auto refs = parse(in, n);
