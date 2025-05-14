@@ -10,6 +10,10 @@ add_executable(psamplz-tool psamplz_tool.cpp)
 target_link_libraries(psamplz-tool zk-psamplz oocmd)
 set_target_properties(psamplz-tool PROPERTIES OUTPUT_NAME "psamplz")
 
+add_executable(slz77-tool slz77_tool.cpp)
+target_link_libraries(slz77-tool ${TBB_LIBRARIES} code fp iopp lz77 pm-malloc oocmd)
+set_target_properties(slz77-tool PROPERTIES OUTPUT_NAME "slz77")
+
 add_executable(topk-lz77-tool topk_lz77_tool.cpp)
 target_link_libraries(topk-lz77-tool zk-topk-lz77 oocmd)
 set_target_properties(topk-lz77-tool PROPERTIES OUTPUT_NAME "topk-lz77")
