@@ -2,12 +2,14 @@
 
 #include <bit>
 #include <execution>
+#include <spanstream>
 #include <tuple>
 #include <vector>
 
 #include <omp.h>
 
 #include <fp/rk61.hpp>
+#include <lz77/factor.hpp>
 
 #include <allocator/alignedallocator.hpp>
 #include <data-structures/hash_table_mods.hpp>
@@ -123,25 +125,11 @@ private:
     internal::Result result_;
     internal::MemoryTimePhase stats_;
 
-public:
-    PSampLZ(size_t len_exp_min, size_t len_exp_max, size_t sampling, size_t bloom_filter_scale = 6, size_t window_size = 64_Mi)
-        : len_exp_min_(len_exp_min),
-          len_exp_max_(len_exp_max),
-          sampling_(sampling),
-          window_size_(window_size),
-          bloom_filter_scale_(bloom_filter_scale) {
-    }
-
-    PSampLZ(PSampLZ&&) = default;
-    PSampLZ& operator=(PSampLZ&&) = default;
-    PSampLZ(PSampLZ const&) = default;
-    PSampLZ& operator=(PSampLZ const&) = default;
-
-    template<iopp::STLInputStreamLike InputStream, iopp::STLOutputStreamLike OutputStream>
+    template<iopp::STLInputStreamLike InputStream>
     requires requires(InputStream& subject, size_t const offs, std::ios_base::seekdir const dir){
         { subject.seekg(offs, dir) };
     }
-    void compress(InputStream& in, size_t const n, OutputStream& out) {
+    std::vector<LZRef2At> parse(InputStream& in, size_t const n) {
         result_ = {};
         CHTLookupStats cht_total_stats;
 
@@ -372,6 +360,62 @@ public:
             stats_.append_child(phase_sample_and_parse);
         }
 
+        result_.add("p", num_threads);
+        result_.add("sampling", sampling_);
+        result_.add("window", window_size);
+        result_.add("bloom_size", bloom_filter_size);
+        result_.add("bloom_fpr", double(cht_total_stats.false_positives) / double(cht_total_stats.bloom_lookups));
+        result_.add("refs", refs.size());
+        result_.add("t", stats_.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
+        result_.add("mem_peak", stats_.get_metric<pm::MallocCounter::MemoryPeakMetric>());
+        return refs;
+    }
+
+public:
+    PSampLZ(size_t len_exp_min, size_t len_exp_max, size_t sampling, size_t bloom_filter_scale = 6, size_t window_size = 64_Mi)
+        : len_exp_min_(len_exp_min),
+          len_exp_max_(len_exp_max),
+          sampling_(sampling),
+          window_size_(window_size),
+          bloom_filter_scale_(bloom_filter_scale) {
+    }
+
+    PSampLZ(PSampLZ&&) = default;
+    PSampLZ& operator=(PSampLZ&&) = default;
+    PSampLZ(PSampLZ const&) = default;
+    PSampLZ& operator=(PSampLZ const&) = default;
+
+    template<std::output_iterator<lz77::Factor> Output>
+    void factorize(std::string_view const& s, Output& out) {
+        // parse
+        size_t const n = s.size();
+        std::ispanstream in(s);
+        auto refs = parse(in, n);
+
+        // factorize
+        size_t i = 0;
+        for(auto it = refs.begin(); i < n && it != refs.end(); it++) {
+            // create literal factors up to the next reference
+            for(; i < it->pos; i++) {
+                *out++ = lz77::Factor(s[i]);
+            }
+
+            // create reference
+            *out++ = lz77::Factor(i - it->src, it->len());
+            i += it->len();
+        }
+
+        // create literal factors for the remaining literals
+        for(; i < n; i++) {
+            *out++ = lz77::Factor(s[i]);
+        }
+    }
+
+    template<iopp::STLInputStreamLike InputStream, iopp::STLOutputStreamLike OutputStream>
+    void compress(InputStream& in, size_t const n, OutputStream& out) {
+        // parse
+        auto refs = parse(in, n);
+
         // encode
         size_t z = 0;
         size_t nout = 0;
@@ -426,14 +470,6 @@ public:
         stats_.stop();
 
         // result
-        result_.add("p", num_threads);
-        result_.add("sampling", sampling_);
-        result_.add("window", window_size);
-        result_.add("bloom_size", bloom_filter_size);
-        result_.add("bloom_fpr", double(cht_total_stats.false_positives) / double(cht_total_stats.bloom_lookups));
-        result_.add("refs", refs.size());
-        result_.add("t", stats_.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
-        result_.add("mem_peak", stats_.get_metric<pm::MallocCounter::MemoryPeakMetric>());
         result_.add("z", z);
         result_.add("nout", nout);
     }
