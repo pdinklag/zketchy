@@ -8,7 +8,7 @@ namespace zk::internal {
 
 // utility to process an input blockwise such that the blocks overlap by a given margin
 // this allows accessing "negative" positions in each block up to the given overlap
-template<iopp::STLInputStreamLike InputStream>
+template<typename InputStream>
 class OverlappingBlocks {
 private:
     using Char = typename InputStream::char_type;

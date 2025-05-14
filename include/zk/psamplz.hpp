@@ -2,7 +2,6 @@
 
 #include <bit>
 #include <execution>
-#include <spanstream>
 #include <tuple>
 #include <vector>
 
@@ -17,6 +16,7 @@
 #include <data-structures/table_config.hpp>
 
 #include "internal/benchmark.hpp"
+#include "internal/io/memory_input_stream.hpp"
 #include "internal/io/overlapping_blocks.hpp"
 #include "internal/io/vbyte_coding.hpp"
 #include "internal/sketch/bloom_filter.hpp"
@@ -125,10 +125,7 @@ private:
     internal::Result result_;
     internal::MemoryTimePhase stats_;
 
-    template<iopp::STLInputStreamLike InputStream>
-    requires requires(InputStream& subject, size_t const offs, std::ios_base::seekdir const dir){
-        { subject.seekg(offs, dir) };
-    }
+    template<typename InputStream>
     std::vector<LZRef2At> parse(InputStream& in, size_t const n) {
         result_ = {};
         CHTLookupStats cht_total_stats;
@@ -391,7 +388,7 @@ public:
         // parse
         std::string_view s(begin, end);
         size_t const n = s.size();
-        std::ispanstream in(s);
+        internal::MemoryInputStream in(s.data(), n);
         auto refs = parse(in, n);
 
         // factorize
@@ -414,6 +411,9 @@ public:
     }
 
     template<iopp::STLInputStreamLike InputStream, iopp::STLOutputStreamLike OutputStream>
+    requires requires(InputStream& subject, size_t const offs, std::ios_base::seekdir const dir){
+        { subject.seekg(offs, dir) };
+    }
     void compress(InputStream& in, size_t const n, OutputStream& out) {
         // parse
         auto refs = parse(in, n);
