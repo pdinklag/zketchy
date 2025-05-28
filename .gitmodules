@@ -19,3 +19,9 @@
 [submodule "extlib/code"]
 	path = extlib/code
 	url = https://github.com/pdinklag/code.git
+[submodule "extlib/unordered_dense"]
+	path = extlib/unordered_dense
+	url = https://github.com/martinus/unordered_dense.git
+[submodule "extlib/libsais"]
+	path = extlib/libsais
+	url = https://github.com/IlyaGrebnov/libsais.git

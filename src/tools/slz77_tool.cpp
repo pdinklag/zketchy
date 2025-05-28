@@ -86,7 +86,7 @@ public:
                 size_t const n = std::min(std::filesystem::file_size(filename), prefix);
 
                 if(output_filename.empty()) {
-                    output_filename = filename + ".lz77";
+                    output_filename = filename + ".slz77";
                 }
 
                 std::vector<lz77::Factor> factors;
