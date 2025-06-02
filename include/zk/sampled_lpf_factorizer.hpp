@@ -59,10 +59,11 @@ private:
         // prefix free parsing
         Index const n = t.size();
 
-        RK rk(rolling_fp_base_, fp_window_);
-        RK64 rk64(rolling_fp_base_);
-        Fingerprint fp = 0;
-        Fingerprint64 fp64 = 0;
+        RK rk_trigger(rolling_fp_base_, fp_window_);
+        RK64 rk_meta(rolling_fp_base_);
+        Fingerprint fp_trigger = 0;
+        Fingerprint64 fp_meta = 0;
+        Fingerprint64 fp_short = 0;
 
         pm::Stopwatch sw;
 
@@ -84,30 +85,30 @@ private:
 
             ankerl::unordered_dense::set<Fingerprint64> meta_fps;
             auto on_trigger = [&](){
-                Metachar x { t.substr(beg, i - beg), fp64, 0 };
+                Metachar x { t.substr(beg, i - beg), fp_meta, 0 };
 
-                if(!meta_fps.contains(fp64)) {
+                if(!meta_fps.contains(fp_meta)) {
                     meta.push_back(x);
-                    meta_fps.emplace(fp64);
+                    meta_fps.emplace(fp_meta);
                 }
-                pre_parse.push_back(fp64);
+                pre_parse.push_back(fp_meta);
 
                 beg = i;
-                fp64 = 0;
+                fp_meta = 0;
             };
 
             for(; i < n && i < fp_window_; i++) {
-                fp = rk.push(fp, t[i]);
-                fp64 = rk64.push(fp64, t[i]);
+                fp_trigger = rk_trigger.push(fp_trigger, t[i]);
+                fp_meta = rk_meta.push(fp_meta, t[i]);
             }
 
             for(; i < n; i++) {
-                if((fp & s) == 0) {
+                if((fp_trigger & s) == 0) {
                     on_trigger();
                 }
 
-                fp = rk.roll(fp, t[i - fp_window_], t[i]);
-                fp64 = rk64.push(fp64, t[i]);
+                fp_trigger = rk_trigger.roll(fp_trigger, t[i - fp_window_], t[i]);
+                fp_meta = rk_meta.push(fp_meta, t[i]);
             }
 
             if(beg < i) {
@@ -328,7 +329,7 @@ private:
             std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
 
             double const avg_gap_len = double(gap_total) / double(gap_num);
-            std::cout << "average gap length: " << avg_gap_len << " (of " << gap_num << " gaps)" << std::endl;
+            std::cout << "average gap length: " << avg_gap_len << " (of " << gap_num << " gaps with total length " << gap_total << ")" << std::endl;
         }
     }
 
