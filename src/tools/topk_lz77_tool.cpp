@@ -15,8 +15,8 @@ private:
     uint64_t prefix = UINTMAX_MAX;
     uint64_t k = 1_Mi;
     uint64_t max_freq = 1_Ki;
+    uint64_t lz_sampling = 4;
     uint64_t window_size = 1_Mi;
-    unsigned int threshold = 2;
 
 public:
     TopkLZ77Tool() : oocmd::ConfigObject("Top-k LZ77", "Best of both worlds approach to blockwise LZ77 and top-k LZ78.") {
@@ -26,8 +26,8 @@ public:
         param('p', "prefix", prefix, "The prefix of the input file to consider.");
         param('k', "num-frequent", k, "The number of frequent substrings to maintain.");
         param('c', "max-freq", max_freq, "The maximum frequency of a frequent pattern.");
+        param('s', "lz-sampling", lz_sampling, "The LZ77 sampling rate (2^value, 0 for exact).");
         param('w', "window", window_size, "The window size.");
-        param('t', "threshold", threshold, "The minimum LZ77 reference length");
     }
 
     int run(oocmd::Application const& app) {
@@ -48,7 +48,7 @@ public:
                     output_filename = filename + ".topklz77";
                 }
 
-                zk::TopkLZ77 topk_lz77(threshold, k, window_size, max_freq, block_size);
+                zk::TopkLZ77 topk_lz77(k, window_size, max_freq, lz_sampling, block_size);
                 {
                     iopp::FileInputStream in(filename, 0, n);
                     iopp::FileOutputStream out(output_filename);

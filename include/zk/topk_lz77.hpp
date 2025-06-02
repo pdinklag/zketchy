@@ -42,20 +42,20 @@ private:
     using Node = Index;
     using Topk = internal::TopKPrefixesMisraGries<>;
 
-    size_t threshold_;
     size_t k_;
     size_t window_size_;
     size_t max_freq_;
+    size_t lz_sampling_;
     size_t block_size_;
 
     internal::Result result_;
 
 public:
-    TopkLZ77(size_t const threshold, size_t const k, size_t const window_size, size_t const max_freq, size_t const block_size)
-        : threshold_(threshold),
-          k_(k),
+    TopkLZ77(size_t const k, size_t const window_size, size_t const max_freq, size_t const lz_sampling, size_t const block_size)
+        : k_(k),
           window_size_(window_size),
           max_freq_(max_freq),
+          lz_sampling_(lz_sampling),
           block_size_(block_size) {
     }
 
@@ -97,9 +97,6 @@ public:
         Topk topk(k_ - 1, max_freq_);
 
         // initialize factorizer
-        //lz77::LPFFactorizer lpf;
-        //lpf.min_reference_length(threshold_);
-        SampledLPFFactorizer lpf(4, 16);
         std::vector<lz77::Factor> factors;
 
         // initialize buffers
@@ -124,7 +121,15 @@ public:
             {
                 phase_block_lz77.resume();
                 factors.clear();
-                lpf.factorize(block.get(), block.get() + block_num, std::back_inserter(factors));
+                {
+                    if(lz_sampling_ > 0) {
+                        SampledLPFFactorizer lpf(lz_sampling_, 16);
+                        lpf.factorize(block.get(), block.get() + block_num, std::back_inserter(factors));
+                    } else {
+                        lz77::LPFFactorizer lpf;
+                        lpf.factorize(block.get(), block.get() + block_num, std::back_inserter(factors));
+                    }
+                }
                 phase_block_lz77.pause();
             }
 
