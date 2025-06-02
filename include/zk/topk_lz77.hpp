@@ -188,7 +188,7 @@ public:
                         }
 
                         // enter
-                        topk_enter(curpos, dv);
+                        // topk_enter(curpos, dv); // -- commented because doing so speeds stuff up without changing results - why was it done?
                         curpos += dv;
                     } else {
                         // encode a LZ77 reference or a literal
