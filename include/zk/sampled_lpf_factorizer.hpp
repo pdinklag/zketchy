@@ -39,6 +39,7 @@ private:
     static constexpr Fingerprint rolling_fp_base_ = (1ULL << 16) - 39;
     static constexpr size_t MAX_SIZE_32BIT = 1ULL << 31;
 
+    /*
     template<typename T>
     static size_t lce(T const& t, size_t const n, size_t const i, size_t const j) {
         size_t l = 0;
@@ -46,6 +47,7 @@ private:
 
         return l;
     }
+    */
 
     size_t sampling_;
     size_t fp_window_;
@@ -239,47 +241,88 @@ private:
         }
 
         {
-            for(size_t j = 0; j < m;) {
+            for(size_t j = 0; j < m; j++) {
+                // keep track of how many characters from the current meta character we have already encoded
+                size_t joffs;
+
                 // get SA position for parse suffix j
                 size_t const cur_pos = isa[j];
 
-                // compute PSV and NSV as well as longest common prefixes
-                
-                // TODO: the LCEs are only w.r.t. meta characters and could potentially be extended to the right by actual text lookups using parse_beg
+                // longest common extension
+                auto lce = [&](size_t const a, size_t const b, size_t& matched_meta, size_t& ext){
+                    size_t l = 0;
 
+                    // first compare meta characters
+                    matched_meta = 0;
+                    while(a + matched_meta < m && b + matched_meta < m && parse[a + matched_meta] == parse[b + matched_meta]) {
+                        l += meta[parse[a + matched_meta]].size();
+                        ++matched_meta;
+                    }
+
+                    // once we have a mismatch, extend by comparing remaining characters
+                    size_t const x = parse_beg[a] + l;
+                    size_t const y = parse_beg[b] + l;
+                    ext = 0;
+                    while(x + ext < n && y + ext < n && t[x + ext] == t[y + ext]) {
+                        ++ext;
+                    }
+
+                    return l + ext;
+                };
+
+                // compute PSV and NSV as well as longest common prefixes
                 ssize_t psv_pos = (ssize_t)cur_pos - 1;
                 while (psv_pos >= 0 && sa[psv_pos] > j) --psv_pos;
-                size_t const psv_lcp = psv_pos >= 0 ? lce(parse, m, j, (size_t)sa[psv_pos]) : 0;
+                size_t psv_matched_meta, psv_ext;
+                size_t const psv_lcp = psv_pos >= 0 ? lce(j, (size_t)sa[psv_pos], psv_matched_meta, psv_ext) : 0;
 
                 size_t nsv_pos = cur_pos + 1;
                 while(nsv_pos < m && sa[nsv_pos] > j) ++nsv_pos;
-                size_t const nsv_lcp = nsv_pos < m ? lce(parse, m, j, (size_t)sa[nsv_pos]) : 0;
+                size_t nsv_matched_meta, nsv_ext;
+                size_t const nsv_lcp = nsv_pos < m ? lce(j, (size_t)sa[nsv_pos], nsv_matched_meta, nsv_ext) : 0;
 
                 // select maximum
-                size_t const max_lcp = std::max(psv_lcp, nsv_lcp);
-                if(max_lcp >= 1) {
-                    ssize_t const max_pos = (max_lcp == psv_lcp) ? psv_pos : nsv_pos;
-                    assert(max_pos >= 0);
-                    assert(max_pos < m);
-                    assert(sa[max_pos] < j);
-
-                    // compute and emit reference
-                    size_t const src = parse_beg[j] - parse_beg[sa[max_pos]];
-                    size_t len = 0;
-                    for(size_t i = 0; i < max_lcp; i++) {
-                        len += meta[parse[j + i]].size();
-                    }
-
-                    *out++ = lz77::Factor(src, len);
-                    j += max_lcp;
+                size_t lcp, src, matched_meta, ext;
+                if(psv_lcp > nsv_lcp) {
+                    lcp = psv_lcp;
+                    src = parse_beg[j] - parse_beg[sa[psv_pos]];
+                    matched_meta = psv_matched_meta;
+                    ext = psv_ext;
                 } else {
-                    // emit the current metacharacter as literals
-                    // TODO: keep some kind of map for really short substrings!
-                    auto const& x = meta[parse[j]];
-                    for(auto c : x.s) {
-                        *out++ = lz77::Factor(c);
+                    lcp = nsv_lcp;
+                    src = parse_beg[j] - parse_beg[sa[nsv_pos]];
+                    matched_meta = nsv_matched_meta;
+                    ext = nsv_ext;
+                }
+
+                // emit reference
+                if(lcp >= 2) {
+                    *out++ = lz77::Factor(src, lcp);
+
+                    j += matched_meta - 1;
+                    if(ext > 0) {
+                        // we have encoded characters from the following meta characters
+                        ++j;
+                        while(j < m && ext >= meta[parse[j]].size()) {
+                            // TODO: we may have skipped additional metacharacters... but HOW???
+                            ext -= meta[parse[j]].size();
+                            ++j;
+                        }
+                        joffs = ext;
+                    } else {
+                        // we have fully encoded all meta characters with previous occurrence
+                        joffs = meta[parse[j]].size();
                     }
-                    j++;
+                } else {
+                    joffs = 0; // we have not encoded anything
+                }
+
+                // emit any remaining characters from current meta character as literals
+                if(j < m) {
+                    for(; joffs < meta[parse[j]].size(); joffs++) {
+                        // TODO: keep table for short repetitions?
+                        *out++ = lz77::Factor(meta[parse[j]].s[joffs]);
+                    }
                 }
             }
         }
