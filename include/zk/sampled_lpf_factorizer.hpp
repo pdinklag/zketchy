@@ -39,16 +39,6 @@ private:
     static constexpr Fingerprint rolling_fp_base_ = (1ULL << 16) - 39;
     static constexpr size_t MAX_SIZE_32BIT = 1ULL << 31;
 
-    /*
-    template<typename T>
-    static size_t lce(T const& t, size_t const n, size_t const i, size_t const j) {
-        size_t l = 0;
-        while(i + l < n && j + l < n && t[i + l] == t[j + l]) ++l;
-
-        return l;
-    }
-    */
-
     size_t sampling_;
     size_t fp_window_;
 
@@ -75,6 +65,8 @@ private:
         Fingerprint64 fp64 = 0;
 
         pm::Stopwatch sw;
+
+        size_t gap_total = 0, gap_num = 0;
 
         if constexpr(debug_) {
             std::cout << "compute metacharacters ... ";
@@ -319,6 +311,10 @@ private:
 
                 // emit any remaining characters from current meta character as literals
                 if(j < m) {
+                    size_t const gap_len = meta[parse[j]].size() - joffs;
+                    gap_total += gap_len;
+                    ++gap_num;
+
                     for(; joffs < meta[parse[j]].size(); joffs++) {
                         // TODO: keep table for short repetitions?
                         *out++ = lz77::Factor(meta[parse[j]].s[joffs]);
@@ -330,6 +326,9 @@ private:
         if constexpr(debug_) {
             sw.stop();
             std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+
+            double const avg_gap_len = double(gap_total) / double(gap_num);
+            std::cout << "average gap length: " << avg_gap_len << " (of " << gap_num << " gaps)" << std::endl;
         }
     }
 
