@@ -2,6 +2,8 @@
 
 #include <lz77/lpf_factorizer.hpp>
 
+#include "sampled_lpf_factorizer.hpp"
+
 #include "internal/benchmark.hpp"
 #include "internal/io/block_coding.hpp"
 #include "internal/sketch/topk_prefixes_misra_gries.hpp"
@@ -95,8 +97,9 @@ public:
         Topk topk(k_ - 1, max_freq_);
 
         // initialize factorizer
-        lz77::LPFFactorizer lpf;
-        lpf.min_reference_length(threshold_);
+        //lz77::LPFFactorizer lpf;
+        //lpf.min_reference_length(threshold_);
+        SampledLPFFactorizer lpf(4, 16);
         std::vector<lz77::Factor> factors;
 
         // initialize buffers
