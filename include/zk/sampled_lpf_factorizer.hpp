@@ -25,6 +25,12 @@ namespace zk {
 
 class SampledLPFFactorizer {
 private:
+    #ifdef _ZK_SAMPLED_LPF_DEBUG
+    static constexpr bool debug_ = true;
+    #else
+    static constexpr bool debug_ = false;
+    #endif
+
     using RK = fp::RabinKarp31;
     using RK64 = fp::RabinKarp61;
     using Fingerprint = RK::Fingerprint;
@@ -68,10 +74,11 @@ private:
 
         pm::Stopwatch sw;
 
-        std::cout << "compute metacharacters ... ";
-        std::cout.flush();
-
-        sw.start();
+        if constexpr(debug_) {
+            std::cout << "compute metacharacters ... ";
+            std::cout.flush();
+            sw.start();
+        }
 
         std::vector<Metachar> meta;
         std::vector<Fingerprint64> pre_parse;
@@ -113,14 +120,19 @@ private:
                 on_trigger();
             }
         }
-        sw.stop();
-        std::cout << " found " << meta.size() << " distinct meta characters, parsing size: " << pre_parse.size() << " (" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+
+        if constexpr(debug_) {
+            sw.stop();
+            std::cout << " found " << meta.size() << " distinct meta characters, parsing size: " << pre_parse.size() << " (" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+        }
 
         // sort meta characters
-        std::cout << "sort meta characters ... ";
-        std::cout.flush();
+        if constexpr(debug_) {
+            std::cout << "sort meta characters ... ";
+            std::cout.flush();
+            sw.start();
+        }
         
-        sw.start();
         {
             std::sort(std::execution::par_unseq, meta.begin(), meta.end(), [&](Metachar const& a, Metachar const& b){
                 return a.s.compare(b.s) < 0;
@@ -130,14 +142,19 @@ private:
                 meta[i].rank = i;
             }
         }
-        sw.stop();
-        std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+
+        if constexpr(debug_) {
+            sw.stop();
+            std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+        }
 
         // parse text
-        std::cout << "compute parsing ... ";
-        std::cout.flush();
+        if constexpr(debug_) {
+            std::cout << "compute parsing ... ";
+            std::cout.flush();
+            sw.start();
+        }
 
-        sw.start();
         std::vector<Index> parse;
         std::vector<Index> parse_beg;
         {
@@ -166,29 +183,19 @@ private:
             // discard no longer needed stuff
             pre_parse = {};
         }
-        sw.stop();
 
-        std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
-
-        // DEBUG: verify parsing
-        /*
-        {
-            size_t errors = 0;
-            size_t i = 0;
-            for(auto x : parse) {
-                for(size_t j = 0; j < meta[x].size(); j++) {
-                    if(meta[x].s[j] != t[i++]) ++errors;
-                }
-            }
-            std::cout << "VERIFICATION: " << errors << " errors" << std::endl;
+        if constexpr(debug_) {
+            sw.stop();
+            std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
         }
-        */
 
         // compute suffix array of parsing
-        std::cout << "compute suffix array ... ";
-        std::cout.flush();
+        if constexpr(debug_) {
+            std::cout << "compute suffix array ... ";
+            std::cout.flush();
+            sw.start();
+        }
 
-        sw.start();
         auto const m = parse.size();
 
         auto const sa_extra_space = 6 * meta.size(); // recommended for libsais
@@ -199,29 +206,38 @@ private:
         } else {
             libsais_int((int32_t*)parse.data(), (int32_t*)sa.get(), m, meta.size(), sa_extra_space);
         }
-        sw.stop();
 
-        std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+        if constexpr(debug_) {
+            sw.stop();
+            std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+        }
 
         // compute inverse
-        std::cout << "compute inverse suffix array ... ";
-        std::cout.flush();
+        if constexpr(debug_) {
+            std::cout << "compute inverse suffix array ... ";
+            std::cout.flush();
+            sw.start();
+        }
 
-        sw.start();
         auto isa = std::make_unique<Index[]>(m);
         {
             for(size_t i = 0; i < m; i++) {
                 isa[sa[i]] = i;
             }
         }
-        sw.stop();
-        std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+
+        if constexpr(debug_) {
+            sw.stop();
+            std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+        }
 
         // factorize
-        std::cout << "factorizing ... ";
-        std::cout.flush();
+        if constexpr(debug_) {
+            std::cout << "factorizing ... ";
+            std::cout.flush();
+            sw.start();
+        }
 
-        sw.start();
         {
             for(size_t j = 0; j < m;) {
                 // get SA position for parse suffix j
@@ -259,15 +275,19 @@ private:
                 } else {
                     // emit the current metacharacter as literals
                     // TODO: keep some kind of map for really short substrings!
-                    for(auto c : meta[parse[j]].s) {
+                    auto const& x = meta[parse[j]];
+                    for(auto c : x.s) {
                         *out++ = lz77::Factor(c);
                     }
                     j++;
                 }
             }
         }
-        sw.stop();
-        std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+
+        if constexpr(debug_) {
+            sw.stop();
+            std::cout << "(" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+        }
     }
 
 public:

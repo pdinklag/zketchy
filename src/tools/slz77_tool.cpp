@@ -2,6 +2,8 @@
 #include <iopp/bitwise_io.hpp>
 #include <iopp/load_file.hpp>
 #include <iopp/file_output_stream.hpp>
+
+#define _ZK_SAMPLED_LPF_DEBUG
 #include <zk/sampled_lpf_factorizer.hpp>
 #include <zk/internal/io/block_coding.hpp>
 #include <zk/internal/util/si_iec_literals.hpp>
