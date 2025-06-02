@@ -196,8 +196,7 @@ private:
         auto const sa_extra_space = 6 * meta.size(); // recommended for libsais
         auto sa = std::make_unique<Index[]>(m + sa_extra_space);
         if constexpr(require_64bit) {
-            // TODO: libsais64_int ???
-            std::abort();
+            libsais64_long((int64_t*)parse.data(), (int64_t*)sa.get(), m, meta.size(), sa_extra_space);
         } else {
             libsais_int((int32_t*)parse.data(), (int32_t*)sa.get(), m, meta.size(), sa_extra_space);
         }
@@ -344,6 +343,7 @@ public:
         std::string_view const t(begin, end);
         size_t const n = t.size();
 
+        // FIXME: whether or not we need 64 bits should depend on the size of the PARSING, not the input
         if(n < MAX_SIZE_32BIT) {
             factorize<false>(t, out);
         } else {
