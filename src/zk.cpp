@@ -29,15 +29,15 @@ public:
                 iopp::FileInputStream in(filename);
 
                 auto precompress = false;
+                auto exact_lz77 = false;
                 size_t len_exp_min, len_exp_max;
 
                 // probe compressibility scores
                 double score = zk::CScore(256, 8).compute(in);
                 std::cout << "score for len=256: " << score << std::endl;
+                in.seekg(0, std::ios_base::beg);
                 if(score > 0.003) {
                     precompress = true;
-
-                    in.seekg(0, std::ios_base::beg);
 
                     score = zk::CScore(4096, 8).compute(in);
                     std::cout << "score for len=4096: " << score << std::endl;
@@ -47,6 +47,12 @@ public:
                     } else {
                         len_exp_min = 8;
                         len_exp_max = 12;
+                    }
+                } else {
+                    score = zk::CScore(8, 8).compute(in);
+                    std::cout << "score for len=8: " << score << std::endl;
+                    if(score < 0.03) {
+                        exact_lz77 = true;
                     }
                 }
                 
@@ -69,7 +75,7 @@ public:
                 {
                     auto const out_filename = filename + ".zk";
                     iopp::FileOutputStream fout(out_filename);
-                    zk::TopkLZ77(16_Mi, 2_Gi-1, 1_Ki, 4, 32_Ki).compress(in, iopp::bitwise_output_to(fout));
+                    zk::TopkLZ77(16_Mi, 2_Gi-1, 1_Ki, exact_lz77 ? 0 : 4, 32_Ki).compress(in, iopp::bitwise_output_to(fout));
                 }
 
                 // clean up
