@@ -21,6 +21,8 @@
 
 #include <pm/stopwatch.hpp> // ONLY FOR DEVELOPMENT
 
+#include "internal/util/si_iec_literals.hpp"
+
 namespace zk {
 
 class SampledLPFFactorizer {
@@ -42,10 +44,12 @@ private:
     size_t sampling_;
     size_t fp_window_;
 
+    using MIndex = uint32_t; // nb: we generally assume that we won't ever have more than 4G metacharacters...
+
     struct Metachar {
         std::string_view s;
         Fingerprint64 fp;
-        size_t rank;
+        MIndex rank;
 
         size_t size() const {
             return s.size();
@@ -55,7 +59,7 @@ private:
     template<bool require_64bit, std::output_iterator<lz77::Factor> Output>
     void factorize(std::string_view const& t, Output& out) {
         using Index = std::conditional_t<require_64bit, uint64_t, uint32_t>;
-
+        
         // prefix free parsing
         Index const n = t.size();
 
@@ -116,9 +120,12 @@ private:
             }
         }
 
+        if(meta.size() >= 4_Gi) std::abort(); // if this happens, you wouldn't want to wait for the result anyway
+        auto const m = pre_parse.size();
+
         if constexpr(debug_) {
             sw.stop();
-            std::cout << " found " << meta.size() << " distinct meta characters, parsing size: " << pre_parse.size() << " (" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
+            std::cout << " found " << meta.size() << " distinct meta characters, parsing size: " << m << " (" << (size_t)sw.elapsed_time_millis() << "ms)" << std::endl;
         }
 
         // sort meta characters
@@ -150,23 +157,23 @@ private:
             sw.start();
         }
 
-        std::vector<Index> parse;
+        std::vector<MIndex> parse;
         std::vector<Index> parse_beg;
         {
             // map fingerprints to ranks
-            ankerl::unordered_dense::map<Fingerprint64, Index> metachar_ranks;
+            ankerl::unordered_dense::map<Fingerprint64, MIndex> metachar_ranks;
             for(auto const& x : meta) {
                 metachar_ranks.emplace(x.fp, x.rank);
             }
 
             // parse
-            parse.reserve(pre_parse.size());
+            parse.reserve(m);
             for(auto fp64 : pre_parse) {
                 parse.push_back(metachar_ranks.find(fp64)->second);
             }
 
             // compute starting positions of phrases
-            parse_beg.reserve(pre_parse.size());
+            parse_beg.reserve(m);
             {
                 size_t i = 0;
                 for(auto x : parse) {
@@ -190,8 +197,6 @@ private:
             std::cout.flush();
             sw.start();
         }
-
-        auto const m = parse.size();
 
         auto const sa_extra_space = 6 * meta.size(); // recommended for libsais
         auto sa = std::make_unique<Index[]>(m + sa_extra_space);
