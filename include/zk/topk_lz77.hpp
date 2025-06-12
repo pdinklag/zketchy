@@ -259,8 +259,6 @@ public:
                         enc.write_char(TOK_LITERAL, block[curpos]);
 
                         ++num_literal;
-
-                        topk_enter(curpos, 1);
                         ++curpos;
 
                         if(curpos > lz_ref.end()) {
@@ -354,16 +352,16 @@ public:
                 for(size_t i = 0; i < phrase_len; i++) {
                     block[curpos + i] = block[srcpos + i];
                 }
-            }
 
-            // enter string into top-k structure
-            {
-                typename Topk::StringState s = topk.empty_string();
-                Node node;
-                while(s.frequent && s.len < phrase_len) {
-                    assert(curpos + s.len < window_size);
-                    node = s.node;
-                    s = topk.extend(s, block[curpos + s.len]);
+                // enter LZ phrase into top-k structure
+                {
+                    typename Topk::StringState s = topk.empty_string();
+                    Node node;
+                    while(s.frequent && s.len < phrase_len) {
+                        assert(curpos + s.len < window_size);
+                        node = s.node;
+                        s = topk.extend(s, block[curpos + s.len]);
+                    }
                 }
             }
 
