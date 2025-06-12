@@ -95,21 +95,11 @@ public:
                     output_filename = filename + ".slz77";
                 }
 
+                size_t z = 0;
                 t.start();
-                std::vector<lz77::Factor> factors;
                 {
                     auto s = iopp::load_file_str(filename, n);
-                    zk::SampledLPFFactorizer lz77(sampling, fp_window);
-                    lz77.factorize(s.begin(), s.end(), std::back_inserter(factors));
-                }
 
-                t.stop();
-
-                if constexpr(zk::internal::do_benchmark) {                
-                    std::cout << "n=" << n << ", z=" << factors.size() << ", t=" << t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", m=" << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << std::endl;
-                }
-
-                {
                     iopp::FileOutputStream fout(output_filename);
                     auto out = iopp::bitwise_output_to(fout);
 
@@ -119,16 +109,25 @@ public:
                     zk::internal::BlockEncoder enc(out, block_size);
                     setup_encoding(enc, n);
 
-                    for(auto f : factors) {
-                        if(f.is_literal()) {
+                    zk::SampledLPFFactorizer lz77(sampling, fp_window);
+                    lz77.factorize(s.begin(), s.end(),
+                        [&](lz77::Factor literal){
                             enc.write_uint(TOK_REF_LEN, 0);
-                            enc.write_char(TOK_LITERAL, f.literal());
-                        } else {
-                            enc.write_uint(TOK_REF_LEN, f.len);
-                            enc.write_uint(TOK_REF_SRC, f.src);
-                        }
-                    }
+                            enc.write_char(TOK_LITERAL, literal.literal());
+                            ++z;
+                        },
+                        [&](lz77::Factor ref){
+                            enc.write_uint(TOK_REF_LEN, ref.len);
+                            enc.write_uint(TOK_REF_SRC, ref.src);
+                            ++z;
+                        });
+
                     enc.flush();
+                }
+                t.stop();
+
+                if constexpr(zk::internal::do_benchmark) {                
+                    std::cout << "n=" << n << ", z=" << z << ", t=" << t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", m=" << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << std::endl;
                 }
             }
             return 0;

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <execution>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <numeric>
@@ -15,7 +16,7 @@
 #include <fp/rk61.hpp>
 #include <ankerl/unordered_dense.h>
 
-#include <lz77/factor.hpp>
+#include <lz77/emit_function.hpp>
 #include <libsais.h>
 #include <libsais64.h>
 
@@ -46,8 +47,8 @@ private:
     using MIndex = uint32_t; // nb: we generally assume that we won't ever have more than 4G metacharacters...
     using MLength = uint32_t;
 
-    template<bool require_64bit, std::output_iterator<lz77::Factor> Output>
-    void factorize(std::string_view const& t, Output& out) {
+    template<bool require_64bit>
+    void factorize(std::string_view const& t, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
         using Index = std::conditional_t<require_64bit, uint64_t, uint32_t>;
         
         struct Metachar {
@@ -241,6 +242,8 @@ private:
             std::cout.flush();
             phase.start();
         }
+
+        internal::TimePhase phase_lce, phase_nsv_psv, phase_emit;
         
         {
             for(size_t j = 0; j < m; j++) {
@@ -252,6 +255,7 @@ private:
 
                 // longest common extension
                 auto lce = [&](size_t const a, size_t const b, size_t& matched_meta, size_t& ext){
+                    phase_lce.resume();
                     size_t l = 0;
 
                     // first compare meta characters
@@ -269,17 +273,24 @@ private:
                         ++ext;
                     }
 
+                    phase_lce.pause();
                     return l + ext;
                 };
 
                 // compute PSV and NSV as well as longest common prefixes
+                phase_nsv_psv.resume();
                 ssize_t psv_pos = (ssize_t)cur_pos - 1;
                 while (psv_pos >= 0 && sa[psv_pos] > j) --psv_pos;
+                phase_nsv_psv.pause();
+
                 size_t psv_matched_meta, psv_ext;
                 size_t const psv_lcp = psv_pos >= 0 ? lce(j, (size_t)sa[psv_pos], psv_matched_meta, psv_ext) : 0;
 
+                phase_nsv_psv.resume();
                 size_t nsv_pos = cur_pos + 1;
                 while(nsv_pos < m && sa[nsv_pos] > j) ++nsv_pos;
+                phase_nsv_psv.pause();
+
                 size_t nsv_matched_meta, nsv_ext;
                 size_t const nsv_lcp = nsv_pos < m ? lce(j, (size_t)sa[nsv_pos], nsv_matched_meta, nsv_ext) : 0;
 
@@ -298,8 +309,9 @@ private:
                 }
 
                 // emit reference
+                phase_emit.resume();
                 if(lcp >= 2) {
-                    *out++ = lz77::Factor(src, lcp);
+                    emit_reference(lz77::Factor(src, lcp));
 
                     j += matched_meta - 1;
                     if(ext > 0) {
@@ -327,9 +339,10 @@ private:
 
                     for(; joffs < get_meta(parse[j]).len; joffs++) {
                         // TODO: keep table for short repetitions?
-                        *out++ = lz77::Factor(t[get_meta(parse[j]).occ + joffs]);
+                        emit_literal(lz77::Factor(t[get_meta(parse[j]).occ + joffs]));
                     }
                 }
+                phase_emit.pause();
             }
         }
 
@@ -337,8 +350,13 @@ private:
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
 
+            std::cout << "\tt_lce=" << (size_t)phase_lce.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>()
+                      << ", t_nsv_psv=" << (size_t)phase_nsv_psv.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>()
+                      << ", t_emit=" << (size_t)phase_emit.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>()
+                      << std::endl;
+
             double const avg_gap_len = double(gap_total) / double(gap_num);
-            std::cout << "average gap length: " << avg_gap_len << " (of " << gap_num << " gaps with total length " << gap_total << ")" << std::endl;
+            std::cout << "\taverage gap length: " << avg_gap_len << " (of " << gap_num << " gaps with total length " << gap_total << ")" << std::endl;
         }
     }
 
@@ -347,18 +365,25 @@ public:
         : sampling_(sampling), fp_window_(fp_window) {
     }
 
-    template<std::contiguous_iterator Input, std::output_iterator<lz77::Factor> Output>
+    template<std::contiguous_iterator Input>
     requires (sizeof(std::iter_value_t<Input>) == 1)
-    void factorize(Input begin, Input const& end, Output out) {
+    void factorize(Input begin, Input const& end, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
         std::string_view const t(begin, end);
         size_t const n = t.size();
 
         // FIXME: whether or not we need 64 bits should depend on the size of the PARSING, not the input
         if(n < MAX_SIZE_32BIT) {
-            factorize<false>(t, out);
+            factorize<false>(t, emit_literal, emit_reference);
         } else {
-            factorize<true>(t, out);
+            factorize<true>(t, emit_literal, emit_reference);
         }
+    }
+
+    template<std::contiguous_iterator Input, std::output_iterator<lz77::Factor> Output>
+    requires (sizeof(std::iter_value_t<Input>) == 1)
+    void factorize(Input begin, Input const& end, Output out) {
+        auto emit = [&](lz77::Factor f){ *out++ = f; };
+        factorize(begin, end, emit, emit);
     }
 };
 
