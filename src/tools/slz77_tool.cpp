@@ -8,6 +8,8 @@
 #include <zk/internal/io/block_coding.hpp>
 #include <zk/internal/util/si_iec_literals.hpp>
 
+#include <zk/internal/benchmark.hpp>
+
 class SLZ77Tool : public oocmd::ConfigObject {
 private:
     static constexpr uint64_t MAGIC =
@@ -85,18 +87,26 @@ public:
                 iopp::FileOutputStream fout(output_filename);
                 fout.write(s.data(), s.length());
             } else {
+                zk::internal::MemoryTimePhase t;
+
                 size_t const n = std::min(std::filesystem::file_size(filename), prefix);
 
                 if(output_filename.empty()) {
                     output_filename = filename + ".slz77";
                 }
 
+                t.start();
                 std::vector<lz77::Factor> factors;
                 {
                     auto s = iopp::load_file_str(filename, n);
                     zk::SampledLPFFactorizer lz77(sampling, fp_window);
                     lz77.factorize(s.begin(), s.end(), std::back_inserter(factors));
-                    std::cout << "z=" << factors.size() << std::endl;
+                }
+
+                t.stop();
+
+                if constexpr(zk::internal::do_benchmark) {                
+                    std::cout << "n=" << n << ", z=" << factors.size() << ", t=" << t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", m=" << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << std::endl;
                 }
 
                 {

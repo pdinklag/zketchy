@@ -44,7 +44,7 @@ private:
     size_t fp_window_;
 
     using MIndex = uint32_t; // nb: we generally assume that we won't ever have more than 4G metacharacters...
-    using MLength = uint16_t;
+    using MLength = uint32_t;
 
     template<bool require_64bit, std::output_iterator<lz77::Factor> Output>
     void factorize(std::string_view const& t, Output& out) {
@@ -54,7 +54,6 @@ private:
             Index occ;
             MLength len;
             Fingerprint64 fp;
-            MIndex rank;
         } __attribute__((packed));
 
         // prefix free parsing
@@ -77,24 +76,27 @@ private:
         }
 
         std::vector<Metachar> meta;
-        std::vector<Fingerprint64> pre_parse;
+        std::vector<MIndex> parse;
         {
             size_t const s = (1ULL << sampling_) - 1;
 
             Index beg = 0;
             Index i = 0;
 
-            ankerl::unordered_dense::set<Fingerprint64> meta_fps;
+            ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps;
             auto on_trigger = [&](){
                 if(i - beg > std::numeric_limits<MLength>::max()) std::abort();
 
-                Metachar x { beg, MLength(i - beg), fp_meta, 0 };
+                Metachar x { beg, MLength(i - beg), fp_meta };
 
-                if(!meta_fps.contains(fp_meta)) {
+                auto it = meta_fps.find(fp_meta);
+                if(it != meta_fps.end()) {
+                    parse.push_back(it->second);
+                } else {
+                    meta_fps.emplace(fp_meta, meta.size());
+                    parse.push_back(MIndex(meta.size()));
                     meta.push_back(x);
-                    meta_fps.emplace(fp_meta);
                 }
-                pre_parse.push_back(fp_meta);
 
                 beg = i;
                 fp_meta = 0;
@@ -122,14 +124,15 @@ private:
         if(meta.size() >= 4_Gi) std::abort(); // if this happens, you wouldn't want to wait for the result anyway
 
         meta.shrink_to_fit();
-        pre_parse.shrink_to_fit();
+        parse.shrink_to_fit();
 
-        auto const m = pre_parse.size();
+        auto const m = parse.size();
         auto const sigma = meta.size();
 
         if constexpr(debug_) {
             phase.stop();
-            std::cout << " found " << sigma << " distinct meta characters, parsing size: " << m << " (" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms)" << std::endl;
+            std::cout << " found " << sigma << " distinct meta characters, parsing size: " << m
+                << " (" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
             std::cout << "\tsizeof(meta)=" << sigma * sizeof(Metachar) << ", sizeof(pre_parse)=" << m * sizeof(Fingerprint64) << std::endl;
         }
 
@@ -139,20 +142,21 @@ private:
             std::cout.flush();
             phase.start();
         }
-        
-        {
-            std::sort(std::execution::par_unseq, meta.begin(), meta.end(), [&](Metachar const& a, Metachar const& b){
-                return std::string_view(t.data() + a.occ, a.len).compare(std::string_view(t.data() + b.occ, b.len)) < 0;
-            });
 
-            for(size_t i = 0; i < meta.size(); i++) {
-                meta[i].rank = i;
+        auto meta_sorted = std::make_unique<MIndex[]>(sigma);
+        {
+            for(size_t i = 0; i < sigma; i++) {
+                meta_sorted[i] = i;
             }
+
+            std::sort(std::execution::par_unseq, meta_sorted.get(), meta_sorted.get() + sigma, [&](MIndex const a, MIndex const b){
+                return std::string_view(t.data() + meta[a].occ, meta[a].len).compare(std::string_view(t.data() + meta[b].occ, meta[b].len)) < 0;
+            });
         }
 
         if constexpr(debug_) {
             phase.stop();
-            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms)" << std::endl;
+            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
         }
 
         // parse text
@@ -162,20 +166,8 @@ private:
             phase.start();
         }
 
-        auto parse = std::make_unique<MIndex[]>(m);
         auto parse_beg = std::make_unique<Index[]>(m);
         {
-            // map fingerprints to ranks
-            ankerl::unordered_dense::map<Fingerprint64, MIndex> metachar_ranks;
-            for(auto const& x : meta) {
-                metachar_ranks.emplace(x.fp, x.rank);
-            }
-
-            // parse
-            for(size_t j = 0; j < m; j++) {
-                parse[j] = metachar_ranks.find(pre_parse[j])->second;
-            }
-
             // compute starting positions of phrases
             {
                 size_t i = 0;
@@ -185,13 +177,21 @@ private:
                 }
             }
 
-            // discard no longer needed stuff
-            pre_parse = {};
+            // inverse metacharacter order
+            auto meta_sorted_inv = std::make_unique<MIndex[]>(sigma);
+            for(size_t i = 0; i < sigma; i++) {
+                meta_sorted_inv[meta_sorted[i]] = i;
+            }
+
+            // rewrite parsing
+            for(size_t j = 0; j < m; j++) {
+                parse[j] = meta_sorted_inv[parse[j]];
+            }
         }
 
         if constexpr(debug_) {
             phase.stop();
-            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms)" << std::endl;
+            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
         }
 
         // compute suffix array of parsing
@@ -201,17 +201,17 @@ private:
             phase.start();
         }
 
-        auto const sa_extra_space = 6 * meta.size(); // recommended for libsais
+        auto const sa_extra_space = 6 * sigma; // recommended for libsais
         auto sa = std::make_unique<Index[]>(m + sa_extra_space);
         if constexpr(require_64bit) {
-            libsais64_long((int64_t*)parse.get(), (int64_t*)sa.get(), m, meta.size(), sa_extra_space);
+            libsais64_long((int64_t*)parse.data(), (int64_t*)sa.get(), m, meta.size(), sa_extra_space);
         } else {
-            libsais_int((int32_t*)parse.get(), (int32_t*)sa.get(), m, meta.size(), sa_extra_space);
+            libsais_int((int32_t*)parse.data(), (int32_t*)sa.get(), m, meta.size(), sa_extra_space);
         }
 
         if constexpr(debug_) {
             phase.stop();
-            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms)" << std::endl;
+            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
         }
 
         // compute inverse
@@ -230,16 +230,18 @@ private:
 
         if constexpr(debug_) {
             phase.stop();
-            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms)" << std::endl;
+            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
         }
 
         // factorize
+        auto get_meta = [&](MIndex const i){ return meta[meta_sorted[i]]; };
+
         if constexpr(debug_) {
             std::cout << "factorizing ... ";
             std::cout.flush();
             phase.start();
         }
-
+        
         {
             for(size_t j = 0; j < m; j++) {
                 // keep track of how many characters from the current meta character we have already encoded
@@ -255,7 +257,7 @@ private:
                     // first compare meta characters
                     matched_meta = 0;
                     while(a + matched_meta < m && b + matched_meta < m && parse[a + matched_meta] == parse[b + matched_meta]) {
-                        l += meta[parse[a + matched_meta]].len;
+                        l += get_meta(parse[a + matched_meta]).len;
                         ++matched_meta;
                     }
 
@@ -303,15 +305,15 @@ private:
                     if(ext > 0) {
                         // we have encoded characters from the following meta characters
                         ++j;
-                        while(j < m && ext >= meta[parse[j]].len) {
+                        while(j < m && ext >= get_meta(parse[j]).len) {
                             // TODO: we may have skipped additional metacharacters... but HOW???
-                            ext -= meta[parse[j]].len;
+                            ext -= get_meta(parse[j]).len;
                             ++j;
                         }
                         joffs = ext;
                     } else {
                         // we have fully encoded all meta characters with previous occurrence
-                        joffs = meta[parse[j]].len;
+                        joffs = get_meta(parse[j]).len;
                     }
                 } else {
                     joffs = 0; // we have not encoded anything
@@ -319,13 +321,13 @@ private:
 
                 // emit any remaining characters from current meta character as literals
                 if(j < m) {
-                    size_t const gap_len = meta[parse[j]].len - joffs;
+                    size_t const gap_len = get_meta(parse[j]).len - joffs;
                     gap_total += gap_len;
                     ++gap_num;
 
-                    for(; joffs < meta[parse[j]].len; joffs++) {
+                    for(; joffs < get_meta(parse[j]).len; joffs++) {
                         // TODO: keep table for short repetitions?
-                        *out++ = lz77::Factor(t[meta[parse[j]].occ + joffs]);
+                        *out++ = lz77::Factor(t[get_meta(parse[j]).occ + joffs]);
                     }
                 }
             }
@@ -333,7 +335,7 @@ private:
 
         if constexpr(debug_) {
             phase.stop();
-            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms)" << std::endl;
+            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
 
             double const avg_gap_len = double(gap_total) / double(gap_num);
             std::cout << "average gap length: " << avg_gap_len << " (of " << gap_num << " gaps with total length " << gap_total << ")" << std::endl;
