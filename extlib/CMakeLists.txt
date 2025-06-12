@@ -9,8 +9,8 @@ add_subdirectory(word-packing)
 add_library(growt INTERFACE)
 target_include_directories(growt INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/growt)
 
-add_library(libsais ${CMAKE_CURRENT_SOURCE_DIR}/libsais/src/libsais.c ${CMAKE_CURRENT_SOURCE_DIR}/libsais/src/libsais64.c)
-target_include_directories(libsais PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libsais/include)
+#add_library(libsais ${CMAKE_CURRENT_SOURCE_DIR}/libsais/src/libsais.c ${CMAKE_CURRENT_SOURCE_DIR}/libsais/src/libsais64.c)
+#target_include_directories(libsais PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libsais/include)
 
 add_library(unordered_dense INTERFACE)
 target_include_directories(unordered_dense INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/unordered_dense/include)
