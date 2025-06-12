@@ -12,6 +12,8 @@
 #include <numeric>
 #include <vector>
 
+#include <omp.h>
+
 #include <fp/rk31.hpp>
 #include <fp/rk61.hpp>
 #include <ankerl/unordered_dense.h>
@@ -243,19 +245,29 @@ private:
             phase.start();
         }
 
-        internal::TimePhase phase_lce, phase_nsv_psv, phase_emit;
-        
+        internal::TimePhase phase_gather, phase_merge, phase_emit;
         {
+            struct Ref {
+                Index beg, src, len;
+                Index end() const { return beg + len - 1; }
+            } __attribute__((packed));
+            auto const num_threads = omp_get_max_threads();
+            std::unique_ptr<std::vector<Ref>> lrefs[num_threads];
+            for(size_t x = 0; x < num_threads; x++) {
+                lrefs[x] = std::make_unique<std::vector<Ref>>();
+            }
+
+            phase_gather.start();
+
+            #pragma omp parallel for
             for(size_t j = 0; j < m; j++) {
-                // keep track of how many characters from the current meta character we have already encoded
-                size_t joffs;
+                auto const thread_num = omp_get_thread_num();
 
                 // get SA position for parse suffix j
                 size_t const cur_pos = isa[j];
 
                 // longest common extension
                 auto lce = [&](size_t const a, size_t const b, size_t& matched_meta, size_t& ext){
-                    phase_lce.resume();
                     size_t l = 0;
 
                     // first compare meta characters
@@ -272,24 +284,18 @@ private:
                     while(x + ext < n && y + ext < n && t[x + ext] == t[y + ext]) {
                         ++ext;
                     }
-
-                    phase_lce.pause();
                     return l + ext;
                 };
 
                 // compute PSV and NSV as well as longest common prefixes
-                phase_nsv_psv.resume();
                 ssize_t psv_pos = (ssize_t)cur_pos - 1;
                 while (psv_pos >= 0 && sa[psv_pos] > j) --psv_pos;
-                phase_nsv_psv.pause();
 
                 size_t psv_matched_meta, psv_ext;
                 size_t const psv_lcp = psv_pos >= 0 ? lce(j, (size_t)sa[psv_pos], psv_matched_meta, psv_ext) : 0;
 
-                phase_nsv_psv.resume();
                 size_t nsv_pos = cur_pos + 1;
                 while(nsv_pos < m && sa[nsv_pos] > j) ++nsv_pos;
-                phase_nsv_psv.pause();
 
                 size_t nsv_matched_meta, nsv_ext;
                 size_t const nsv_lcp = nsv_pos < m ? lce(j, (size_t)sa[nsv_pos], nsv_matched_meta, nsv_ext) : 0;
@@ -309,9 +315,9 @@ private:
                 }
 
                 // emit reference
-                phase_emit.resume();
                 if(lcp >= 2) {
-                    emit_reference(lz77::Factor(src, lcp));
+                    lrefs[thread_num]->emplace_back(parse_beg[j], src, lcp);
+                    // emit_reference(lz77::Factor(src, lcp));
 
                     j += matched_meta - 1;
                     if(ext > 0) {
@@ -322,36 +328,58 @@ private:
                             ext -= get_meta(parse[j]).len;
                             ++j;
                         }
-                        joffs = ext;
-                    } else {
-                        // we have fully encoded all meta characters with previous occurrence
-                        joffs = get_meta(parse[j]).len;
-                    }
-                } else {
-                    joffs = 0; // we have not encoded anything
-                }
-
-                // emit any remaining characters from current meta character as literals
-                if(j < m) {
-                    size_t const gap_len = get_meta(parse[j]).len - joffs;
-                    gap_total += gap_len;
-                    ++gap_num;
-
-                    for(; joffs < get_meta(parse[j]).len; joffs++) {
-                        // TODO: keep table for short repetitions?
-                        emit_literal(lz77::Factor(t[get_meta(parse[j]).occ + joffs]));
                     }
                 }
-                phase_emit.pause();
             }
+            phase_gather.stop();
+
+            // merge refs
+            phase_merge.start();
+            // TODO: this is not really necessary -- altenratively we could just iterate over the refs in a somewhat smart way
+            std::vector<Ref> refs;
+            for(size_t x = 0; x < num_threads; x++) {
+                for(auto ref : *lrefs[x]) refs.push_back(ref);
+                lrefs[x].release();
+            }
+            refs.shrink_to_fit();
+            phase_merge.stop();
+
+            // emit
+            phase_emit.start();
+            {
+                size_t cur_gap = 0;
+
+                size_t i = 0;
+                size_t j = 0;
+                while(i < n) {
+                    while(j < refs.size() && i > refs[j].end()) {
+                        ++j;
+                    }
+
+                    if(j < refs.size() && i >= refs[j].beg) {
+                        auto const d = i - refs[j].beg;
+                        emit_reference(lz77::Factor(refs[j].src, refs[j].len - d));
+                        i = refs[j++].end() + 1;
+
+                        if(cur_gap > 0) ++gap_num;
+                        cur_gap = 0;
+                    } else {
+                        emit_literal(t[i++]);
+
+                        ++gap_total;
+                        ++cur_gap;
+                    }
+                }
+                if(cur_gap > 0) ++gap_num;
+            }
+            phase_emit.stop();
         }
 
         if constexpr(debug_) {
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
-
-            std::cout << "\tt_lce=" << (size_t)phase_lce.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>()
-                      << ", t_nsv_psv=" << (size_t)phase_nsv_psv.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>()
+            std::cout << "\tt_gather=" << (size_t)phase_gather.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>()
+                      << ", t_merge=" << (size_t)phase_merge.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>()
                       << ", t_emit=" << (size_t)phase_emit.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>()
                       << std::endl;
 
