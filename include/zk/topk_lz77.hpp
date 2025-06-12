@@ -37,6 +37,7 @@ private:
     }
     
     static constexpr size_t MAX_LZ_REF_LEN = 255;
+    static constexpr size_t MAX_WINDOW_SIZE = 2'147'483'647;
 
     using Index = uint32_t;
     using Node = Index;
@@ -50,13 +51,25 @@ private:
 
     internal::Result result_;
 
+    struct LZRef {
+        Index pos, src, len;
+        Index num_literals() const { return len; }
+        Index end() const { return pos + len - 1; }
+    } __attribute__((packed));
+
+    enum WhatToDoNext { TRIE_REF, LZ_REF, LITERAL };
+
 public:
     TopkLZ77(size_t const k, size_t const window_size, size_t const max_freq, size_t const lz_sampling, size_t const block_size)
         : k_(k),
-          window_size_(window_size),
+          window_size_(std::min(window_size, MAX_WINDOW_SIZE)),
           max_freq_(max_freq),
           lz_sampling_(lz_sampling),
           block_size_(block_size) {
+        
+        if(window_size > MAX_WINDOW_SIZE) {
+            std::cerr << "window size clamped to maximum value of " << MAX_WINDOW_SIZE << std::endl;
+        }
     }
 
     TopkLZ77(TopkLZ77&&) = default;
@@ -97,10 +110,10 @@ public:
         Topk topk(k_ - 1, max_freq_);
 
         // initialize factorizer
-        std::vector<lz77::Factor> factors;
+        std::vector<LZRef> lz_refs;
 
         // initialize buffers
-        auto block_offs = 0;
+        size_t block_offs = 0;
         auto block = std::make_unique<char[]>(window_size_);
 
         while(in) {
@@ -120,14 +133,23 @@ public:
             // compute the LZ77 factorization of the block
             {
                 phase_block_lz77.resume();
-                factors.clear();
+                lz_refs.clear();
                 {
+                    size_t i = 0;
+                    auto emit_literal = [&](lz77::Factor){
+                        i++;
+                    };
+                    auto emit_ref = [&](lz77::Factor f){
+                        lz_refs.emplace_back(i, f.src, f.len);
+                        i += f.num_literals();
+                    };
+
                     if(lz_sampling_ > 0) {
                         SampledLPFFactorizer lpf(lz_sampling_, 16);
-                        lpf.factorize(block.get(), block.get() + block_num, std::back_inserter(factors));
+                        lpf.factorize(block.get(), block.get() + block_num, emit_literal, emit_ref);
                     } else {
                         lz77::LPFFactorizer lpf;
-                        lpf.factorize(block.get(), block.get() + block_num, std::back_inserter(factors));
+                        lpf.factorize(block.get(), block.get() + block_num, emit_literal, emit_ref);
                     }
                 }
                 phase_block_lz77.pause();
@@ -151,7 +173,7 @@ public:
                     }
                 };
 
-                Index z = 0; // the current LZ77 factor
+                Index z = 0; // the current or next LZ reference
                 Index curpos = 0;
                 while(curpos < block_num) {
                     auto const gpos = block_offs + curpos;
@@ -160,8 +182,26 @@ public:
                     Node v;
                     Index dv = topk.find(block.get() + curpos, block_num - curpos, v);
 
-                    auto const& f = factors[z];
-                    if(dv >= f.num_literals()) {
+                    // examine the current or next LZ reference
+                    auto const& lz_ref = lz_refs[z];
+
+                    // decide what to do
+                    WhatToDoNext decision;
+
+                    if(z >= lz_refs.size() || curpos < lz_ref.pos) {
+                        // we have no current LZ reference that we can use
+                        decision = (dv >= 1) ? TRIE_REF : LITERAL;
+                    } else {
+                        if(dv >= lz_ref.num_literals()) {
+                            // trie reference is at least as good as LZ reference -- prefer it since the encoding is smaller
+                            decision = TRIE_REF;
+                        } else {
+                            // LZ reference is longer than trie reference
+                            decision = lz_ref.num_literals() > 1 ? LZ_REF : LITERAL;
+                        }
+                    }
+
+                    if(decision == TRIE_REF) {
                         // encode a top-k trie reference
                         assert(v > 0);
 
@@ -172,63 +212,60 @@ public:
                         trie_longest = std::max(trie_longest, (size_t)dv);
                         total_trie_len += dv;
 
-                        // advance in LZ77 factorization
-                        if(curpos + dv < block_num) {
-                            auto d = dv;
-                            while(d >= factors[z].num_literals()) {
-                                d -= factors[z].num_literals();
+                        // advance in LZ77 references
+                        curpos += dv;
+                        if(curpos < block_num) {
+                            while(z < lz_refs.size() && curpos > lz_refs[z].end()) {
                                 ++z;
                             }
 
-                            if(d > 0) {
+                            if(z < lz_refs.size() && curpos > lz_refs[z].pos) {
                                 // chop current LZ77 factor
-                                assert(factors[z].len > d);
-                                factors[z].len -= d;
+                                auto const chop = curpos - lz_refs[z].pos;
+                                lz_refs[z].pos += chop;
+                                lz_refs[z].len -= chop;
                             }
                         }
+                    } else if(decision == LZ_REF) {
+                        // a real LZ77 reference
+                        auto const fpos = curpos;
+                        assert(fpos >= lz_ref.src);
+
+                        if(lz_ref.len >= MAX_LZ_REF_LEN) {
+                            // encode the maximum length, then encode the rest as a special token
+                            enc.write_uint(TOK_FACT_LEN, MAX_LZ_REF_LEN);
+                            enc.write_uint(TOK_FACT_REMAINDER, lz_ref.len - MAX_LZ_REF_LEN);
+                        } else {
+                            // simply encode the length
+                            enc.write_uint(TOK_FACT_LEN, lz_ref.len);
+                        }
+
+                        // write source
+                        enc.write_uint(TOK_FACT_SRC, lz_ref.src);
+
+                        ++num_lz;
+                        lz_longest = std::max(lz_longest, (size_t)lz_ref.len);
+                        total_lz_len += lz_ref.len;
 
                         // enter
-                        // topk_enter(curpos, dv); // -- commented because doing so speeds stuff up without changing results - why was it done?
-                        curpos += dv;
-                    } else {
-                        // encode a LZ77 reference or a literal
-                        if(f.is_literal() || f.num_literals() == 1) {
-                            // a literal factor (possibly a reference of length one introduced due to chopping)
-                            enc.write_uint(TOK_FACT_LEN, 1);
-                            enc.write_char(TOK_LITERAL, block[curpos]);
+                        topk_enter(curpos, lz_ref.len);
+                        curpos += lz_ref.len;
 
-                            ++num_literal;
-
-                            topk_enter(curpos, 1);
-                            ++curpos;
-                        } else {
-                            // a real LZ77 reference
-                            auto const fpos = curpos;
-                            assert(fpos >= f.src);
-
-                            if(f.len >= MAX_LZ_REF_LEN) {
-                                // encode the maximum length, then encode the rest as a special token
-                                enc.write_uint(TOK_FACT_LEN, MAX_LZ_REF_LEN);
-                                enc.write_uint(TOK_FACT_REMAINDER, f.len - MAX_LZ_REF_LEN);
-                            } else {
-                                // simply encode the length
-                                enc.write_uint(TOK_FACT_LEN, f.len);
-                            }
-
-                            // write source
-                            enc.write_uint(TOK_FACT_SRC, f.src);
-
-                            ++num_lz;
-                            lz_longest = std::max(lz_longest, (size_t)f.len);
-                            total_lz_len += f.len;
-
-                            // enter
-                            topk_enter(curpos, f.len);
-                            curpos += f.len;
-                        }
-
-                        // advance to next LZ77 factor
+                        // advance to next LZ reference
                         ++z;
+                    } else {
+                        // encode a literal
+                        enc.write_uint(TOK_FACT_LEN, 1);
+                        enc.write_char(TOK_LITERAL, block[curpos]);
+
+                        ++num_literal;
+
+                        topk_enter(curpos, 1);
+                        ++curpos;
+
+                        if(curpos > lz_ref.end()) {
+                            ++z;
+                        }
                     }
                 }
                 phase_process.pause();
