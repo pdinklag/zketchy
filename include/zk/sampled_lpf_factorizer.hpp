@@ -136,7 +136,6 @@ private:
             phase.stop();
             std::cout << " found " << sigma << " distinct meta characters, parsing size: " << m
                 << " (" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
-            std::cout << "\tsizeof(meta)=" << sigma * sizeof(Metachar) << ", sizeof(pre_parse)=" << m * sizeof(Fingerprint64) << std::endl;
         }
 
         // sort meta characters

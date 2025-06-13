@@ -34,7 +34,7 @@ private:
     size_t prefix = SIZE_MAX;
     uint64_t block_size = 32_Ki; // best value according to many many experiments
 
-    uint64_t sampling = 8;
+    uint64_t sampling = 4;
     uint64_t fp_window = 16;
 
     bool count_only = false;
@@ -127,11 +127,12 @@ public:
                 }
 
                 size_t z = 0;
-                t.start();
+                
                 {
                     auto s = iopp::load_file_str(filename, n);
-
+                    
                     zk::SampledLPFFactorizer lz77(sampling, fp_window);
+                    t.start();
                     if(!count_only) {
                         iopp::FileOutputStream fout(output_filename);
                         auto out = iopp::bitwise_output_to(fout);
@@ -148,9 +149,9 @@ public:
                     } else {
                         z = factorize(lz77, s);
                     }
+                    t.stop();
                 }
-                t.stop();
-
+                
                 if constexpr(zk::internal::do_benchmark) {                
                     std::cout << "n=" << n << ", z=" << z << ", t=" << t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", m=" << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << std::endl;
                 }
