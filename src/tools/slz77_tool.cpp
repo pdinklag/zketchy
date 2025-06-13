@@ -37,6 +37,36 @@ private:
     uint64_t sampling = 8;
     uint64_t fp_window = 16;
 
+    bool count_only = false;
+
+    static size_t factorize(zk::SampledLPFFactorizer& factorizer, std::string const& s) {
+        size_t z = 0;
+        factorizer.factorize(s.begin(), s.end(),
+            [&](lz77::Factor literal){
+                ++z;
+            },
+            [&](lz77::Factor ref){
+                ++z;
+            });
+        return z;
+    }
+
+    static size_t factorize(zk::SampledLPFFactorizer& factorizer, std::string const& s, auto& enc) {
+        size_t z = 0;
+        factorizer.factorize(s.begin(), s.end(),
+            [&](lz77::Factor literal){
+                    enc.write_uint(TOK_REF_LEN, 0);
+                    enc.write_char(TOK_LITERAL, literal.literal());
+                ++z;
+            },
+            [&](lz77::Factor ref){
+                    enc.write_uint(TOK_REF_LEN, ref.len);
+                    enc.write_uint(TOK_REF_SRC, ref.src);
+                ++z;
+            });
+        return z;
+    }
+
 public:
     SLZ77Tool() : oocmd::ConfigObject("LZ77", "Compute and encode the exact LZ77 factorization") {
         param('s', "sampling", sampling, "The sampling rate (2^value).");
@@ -45,6 +75,7 @@ public:
         param('p', "prefix", prefix, "Process only this prefix of the input file.");
         param('o', "out", output_filename, "The output filename.");
         param('d', "decompress", decompress, "Decompress the input file rather than compressing it.");
+        param("count", count_only, "Only count the factors, don't actually write to the output file.");
     }
 
     int run(oocmd::Application const& app) {
@@ -100,29 +131,23 @@ public:
                 {
                     auto s = iopp::load_file_str(filename, n);
 
-                    iopp::FileOutputStream fout(output_filename);
-                    auto out = iopp::bitwise_output_to(fout);
-
-                    out.write(MAGIC, 32);
-                    out.write(n, 64);
-
-                    zk::internal::BlockEncoder enc(out, block_size);
-                    setup_encoding(enc, n);
-
                     zk::SampledLPFFactorizer lz77(sampling, fp_window);
-                    lz77.factorize(s.begin(), s.end(),
-                        [&](lz77::Factor literal){
-                            enc.write_uint(TOK_REF_LEN, 0);
-                            enc.write_char(TOK_LITERAL, literal.literal());
-                            ++z;
-                        },
-                        [&](lz77::Factor ref){
-                            enc.write_uint(TOK_REF_LEN, ref.len);
-                            enc.write_uint(TOK_REF_SRC, ref.src);
-                            ++z;
-                        });
+                    if(!count_only) {
+                        iopp::FileOutputStream fout(output_filename);
+                        auto out = iopp::bitwise_output_to(fout);
 
-                    enc.flush();
+                        zk::internal::BlockEncoder enc(out, block_size);
+
+                        out.write(MAGIC, 32);
+                        out.write(n, 64);
+                        setup_encoding(enc, n);
+
+                        z = factorize(lz77, s, enc);
+
+                        enc.flush();
+                    } else {
+                        z = factorize(lz77, s);
+                    }
                 }
                 t.stop();
 
