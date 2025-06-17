@@ -23,6 +23,7 @@
 #include <libsais64.h>
 
 #include "internal/benchmark.hpp"
+#include "internal/util/idiv_ceil.hpp"
 #include "internal/util/si_iec_literals.hpp"
 
 namespace zk {
@@ -61,13 +62,91 @@ private:
 
         // prefix free parsing
         Index const n = t.size();
+        auto const num_threads = omp_get_max_threads();
+        Index const num_per_thread = internal::idiv_ceil(n, num_threads);
 
         internal::MemoryTimePhase phase;
 
         size_t gap_total = 0, gap_num = 0;
 
         if constexpr(debug_) {
-            std::cout << "compute metacharacters ... ";
+            std::cout << "parallel pre-parse ... ";
+            std::cout.flush();
+            phase.start();
+        }
+
+        std::unique_ptr<std::vector<Metachar>> lpre_parse[num_threads];
+        {
+            RK rk_trigger(rolling_fp_base_, fp_window_);
+            RK64 rk_meta(rolling_fp_base_);
+
+            size_t const s = (1ULL << sampling_) - 1;
+
+            #pragma omp parallel
+            {
+                Index const thread_num = omp_get_thread_num();
+                Index const beg = thread_num * num_per_thread;
+                Index const end = std::min(beg + num_per_thread, n);
+
+                lpre_parse[thread_num] = std::make_unique<std::vector<Metachar>>();
+                auto& local_pre_parse = *lpre_parse[thread_num];
+
+                Fingerprint fp_trigger = 0;
+                Fingerprint64 fp_meta = 0;
+
+                if(thread_num > 0) {
+                    // consider previous characters for consistent triggering
+                    for(Index j = beg - fp_window_; j < beg; j++) {
+                        fp_trigger = rk_trigger.push(fp_trigger, t[j]);
+                    }
+                }
+
+                Index last = beg;
+                Index i = beg;
+
+                for(; i < end && i < fp_window_; i++) {
+                    if(thread_num == 0) {
+                        // initialize
+                        fp_trigger = rk_trigger.push(fp_trigger, t[i]);
+                    } else {
+                        // roll
+                        fp_trigger = rk_trigger.roll(fp_trigger, t[i - fp_window_], t[i]);
+                    }
+                    fp_meta = rk_meta.push(fp_meta, t[i]);
+                }
+
+                for(; i < end; i++) {
+                    if((fp_trigger & s) == 0) {
+                        local_pre_parse.push_back(Metachar{ last, MLength(i - last), fp_meta });
+                        last = i;
+                        fp_meta = 0;
+                    }
+
+                    fp_trigger = rk_trigger.roll(fp_trigger, t[i - fp_window_], t[i]);
+                    fp_meta = rk_meta.push(fp_meta, t[i]);
+                }
+
+                if(last < i) {
+                    local_pre_parse.push_back(Metachar{ last, MLength(i - last), fp_meta });
+                }
+
+                local_pre_parse.shrink_to_fit();
+            }
+        }
+
+        if constexpr(debug_) {
+            phase.stop();
+            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
+
+            size_t pre_parse_size = 0;
+            for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
+                pre_parse_size += lpre_parse[thread_num]->size();
+            }
+            std::cout << "\tparse size: " << pre_parse_size << std::endl;
+        }
+
+        if constexpr(debug_) {
+            std::cout << "compute distinct metacharacters ... ";
             std::cout.flush();
             phase.start();
         }
@@ -75,51 +154,21 @@ private:
         std::vector<Metachar> meta;
         std::vector<MIndex> parse;
         {
-            size_t const s = (1ULL << sampling_) - 1;
-
-            RK rk_trigger(rolling_fp_base_, fp_window_);
-            RK64 rk_meta(rolling_fp_base_);
-            Fingerprint fp_trigger = 0;
-            Fingerprint64 fp_meta = 0;
-
-            Index beg = 0;
-            Index i = 0;
-
             ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps;
-            auto on_trigger = [&](){
-                if(i - beg > std::numeric_limits<MLength>::max()) std::abort();
+            for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
+                for(auto& x : *lpre_parse[thread_num]) {
+                    auto const fp = x.fp;
+                    auto it = meta_fps.find(fp);
+                    if(it != meta_fps.end()) {
+                        parse.push_back(it->second);
+                    } else {
+                        parse.push_back(MIndex(meta.size()));
 
-                Metachar x { beg, MLength(i - beg), fp_meta };
-
-                auto it = meta_fps.find(fp_meta);
-                if(it != meta_fps.end()) {
-                    parse.push_back(it->second);
-                } else {
-                    meta_fps.emplace(fp_meta, meta.size());
-                    parse.push_back(MIndex(meta.size()));
-                    meta.push_back(x);
+                        meta_fps.emplace(fp, meta.size());
+                        meta.push_back(x);
+                    }
                 }
-
-                beg = i;
-                fp_meta = 0;
-            };
-
-            for(; i < n && i < fp_window_; i++) {
-                fp_trigger = rk_trigger.push(fp_trigger, t[i]);
-                fp_meta = rk_meta.push(fp_meta, t[i]);
-            }
-
-            for(; i < n; i++) {
-                if((fp_trigger & s) == 0) {
-                    on_trigger();
-                }
-
-                fp_trigger = rk_trigger.roll(fp_trigger, t[i - fp_window_], t[i]);
-                fp_meta = rk_meta.push(fp_meta, t[i]);
-            }
-
-            if(beg < i) {
-                on_trigger();
+                lpre_parse[thread_num].release();
             }
         }
 
@@ -133,13 +182,13 @@ private:
 
         if constexpr(debug_) {
             phase.stop();
-            std::cout << " found " << sigma << " distinct meta characters, parsing size: " << m
-                << " (" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
+            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
+            std::cout << "\tdistinct metacharacters: " << sigma << std::endl;
         }
 
         // sort meta characters
         if constexpr(debug_) {
-            std::cout << "sort meta characters ... ";
+            std::cout << "sort metacharacters ... ";
             std::cout.flush();
             phase.start();
         }
