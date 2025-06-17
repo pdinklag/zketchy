@@ -62,12 +62,6 @@ private:
         // prefix free parsing
         Index const n = t.size();
 
-        RK rk_trigger(rolling_fp_base_, fp_window_);
-        RK64 rk_meta(rolling_fp_base_);
-        Fingerprint fp_trigger = 0;
-        Fingerprint64 fp_meta = 0;
-        Fingerprint64 fp_short = 0;
-
         internal::MemoryTimePhase phase;
 
         size_t gap_total = 0, gap_num = 0;
@@ -82,6 +76,11 @@ private:
         std::vector<MIndex> parse;
         {
             size_t const s = (1ULL << sampling_) - 1;
+
+            RK rk_trigger(rolling_fp_base_, fp_window_);
+            RK64 rk_meta(rolling_fp_base_);
+            Fingerprint fp_trigger = 0;
+            Fingerprint64 fp_meta = 0;
 
             Index beg = 0;
             Index i = 0;
