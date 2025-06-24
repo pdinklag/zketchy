@@ -261,7 +261,7 @@ public:
                         ++num_literal;
                         ++curpos;
 
-                        if(curpos > lz_ref.end()) {
+                        if(z < lz_refs.size() && curpos > lz_ref.end()) {
                             ++z;
                         }
                     }
