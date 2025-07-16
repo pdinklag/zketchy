@@ -75,7 +75,7 @@ public:
                 {
                     auto const out_filename = filename + ".zk";
                     iopp::FileOutputStream fout(out_filename);
-                    zk::TopkLZ77(16_Mi, 2_Gi-1, 1_Ki, exact_lz77 ? 0 : 4, 32_Ki).compress(in, iopp::bitwise_output_to(fout));
+                    zk::TopkLZ77(16_Mi, 2_Gi-1, 1_Ki, exact_lz77 ? 0 : 4, 1, 32_Ki).compress(in, iopp::bitwise_output_to(fout));
                 }
 
                 // clean up
