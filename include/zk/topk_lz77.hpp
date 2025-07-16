@@ -181,6 +181,7 @@ public:
                     // find the longest string represented in the top-k trie starting at the current position
                     Node v;
                     Index dv = topk.find(block.get() + curpos, block_num - curpos, v);
+                    Index lz_ref_len;
 
                     // examine the current or next LZ reference
                     auto const& lz_ref = lz_refs[z];
@@ -192,12 +193,13 @@ public:
                         // we have no current LZ reference that we can use
                         decision = (dv >= 1) ? TRIE_REF : LITERAL;
                     } else {
-                        if(dv >= lz_ref.num_literals()) {
+                        lz_ref_len = lz_ref.num_literals() - (curpos - lz_ref.pos);
+                        if(dv >= lz_ref_len) {
                             // trie reference is at least as good as LZ reference -- prefer it since the encoding is smaller
                             decision = TRIE_REF;
                         } else {
                             // LZ reference is longer than trie reference
-                            decision = lz_ref.num_literals() > 1 ? LZ_REF : LITERAL;
+                            decision = lz_ref_len > 1 ? LZ_REF : LITERAL;
                         }
                     }
 
@@ -218,38 +220,31 @@ public:
                             while(z < lz_refs.size() && curpos > lz_refs[z].end()) {
                                 ++z;
                             }
-
-                            if(z < lz_refs.size() && curpos > lz_refs[z].pos) {
-                                // chop current LZ77 factor
-                                auto const chop = curpos - lz_refs[z].pos;
-                                lz_refs[z].pos += chop;
-                                lz_refs[z].len -= chop;
-                            }
                         }
                     } else if(decision == LZ_REF) {
                         // a real LZ77 reference
                         auto const fpos = curpos;
                         assert(fpos >= lz_ref.src);
 
-                        if(lz_ref.len >= MAX_LZ_REF_LEN) {
+                        if(lz_ref_len >= MAX_LZ_REF_LEN) {
                             // encode the maximum length, then encode the rest as a special token
                             enc.write_uint(TOK_FACT_LEN, MAX_LZ_REF_LEN);
-                            enc.write_uint(TOK_FACT_REMAINDER, lz_ref.len - MAX_LZ_REF_LEN);
+                            enc.write_uint(TOK_FACT_REMAINDER, lz_ref_len - MAX_LZ_REF_LEN);
                         } else {
                             // simply encode the length
-                            enc.write_uint(TOK_FACT_LEN, lz_ref.len);
+                            enc.write_uint(TOK_FACT_LEN, lz_ref_len);
                         }
 
                         // write source
                         enc.write_uint(TOK_FACT_SRC, lz_ref.src);
 
                         ++num_lz;
-                        lz_longest = std::max(lz_longest, (size_t)lz_ref.len);
-                        total_lz_len += lz_ref.len;
+                        lz_longest = std::max(lz_longest, (size_t)lz_ref_len);
+                        total_lz_len += lz_ref_len;
 
                         // enter
-                        topk_enter(curpos, lz_ref.len);
-                        curpos += lz_ref.len;
+                        topk_enter(curpos, lz_ref_len);
+                        curpos += lz_ref_len;
 
                         // advance to next LZ reference
                         ++z;
