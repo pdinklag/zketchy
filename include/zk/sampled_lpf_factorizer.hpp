@@ -168,7 +168,7 @@ private:
                         meta.push_back(x);
                     }
                 }
-                lpre_parse[thread_num].release();
+                lpre_parse[thread_num].reset();
             }
         }
 
