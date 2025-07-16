@@ -47,24 +47,25 @@ private:
     size_t window_size_;
     size_t max_freq_;
     size_t lz_sampling_;
+    size_t lz_phrase_suffixes_;
     size_t block_size_;
 
     internal::Result result_;
 
     struct LZRef {
         Index pos, src, len;
-        Index num_literals() const { return len; }
         Index end() const { return pos + len - 1; }
     } __attribute__((packed));
 
     enum WhatToDoNext { TRIE_REF, LZ_REF, LITERAL };
 
 public:
-    TopkLZ77(size_t const k, size_t const window_size, size_t const max_freq, size_t const lz_sampling, size_t const block_size)
+    TopkLZ77(size_t const k, size_t const window_size, size_t const max_freq, size_t const lz_sampling, size_t const lz_phrase_suffixes, size_t const block_size)
         : k_(k),
           window_size_(std::min(window_size, MAX_WINDOW_SIZE)),
           max_freq_(max_freq),
           lz_sampling_(lz_sampling),
+          lz_phrase_suffixes_(lz_phrase_suffixes),
           block_size_(block_size) {
         
         if(window_size > MAX_WINDOW_SIZE) {
@@ -183,7 +184,7 @@ public:
                     Index dv = topk.find(block.get() + curpos, block_num - curpos, v);
                     Index lz_ref_len;
 
-                    // advance in LZ references
+                    // advance to next LZ reference
                     while(z < lz_refs.size() && curpos > lz_refs[z].end()) {
                         ++z;
                     }
@@ -195,7 +196,7 @@ public:
                         // we have no current LZ reference that we can use
                         decision = (dv >= 1) ? TRIE_REF : LITERAL;
                     } else {
-                        lz_ref_len = lz_refs[z].num_literals() - (curpos - lz_refs[z].pos);
+                        lz_ref_len = lz_refs[z].len - (curpos - lz_refs[z].pos);
                         if(dv >= lz_ref_len) {
                             // trie reference is at least as good as LZ reference -- prefer it since the encoding is smaller
                             decision = TRIE_REF;
@@ -212,6 +213,7 @@ public:
                         enc.write_uint(TOK_FACT_LEN, 0);
                         enc.write_uint(TOK_TRIE_REF, v);
                         
+                        // statistics
                         ++num_trie;
                         trie_longest = std::max(trie_longest, (size_t)dv);
                         total_trie_len += dv;
@@ -236,22 +238,31 @@ public:
                         // write source
                         enc.write_uint(TOK_FACT_SRC, src);
 
+                        // statistics
                         ++num_lz;
                         lz_longest = std::max(lz_longest, (size_t)lz_ref_len);
                         total_lz_len += lz_ref_len;
 
                         // enter
-                        topk_enter(curpos, lz_ref_len);
+                        for(size_t x = 0; x < lz_ref_len && x < lz_phrase_suffixes_; x++) {
+                            topk_enter(curpos + x, lz_ref_len - x);
+                        }
+
+                        // advance
                         curpos += lz_ref_len;
                     } else {
                         // encode a literal
                         enc.write_uint(TOK_FACT_LEN, 1);
                         enc.write_char(TOK_LITERAL, block[curpos]);
 
+                        // statistics
                         ++num_literal;
+
+                        // advance
                         ++curpos;
                     }
                 }
+
                 phase_process.pause();
             }
 

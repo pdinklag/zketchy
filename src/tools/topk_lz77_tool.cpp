@@ -16,6 +16,7 @@ private:
     uint64_t k = 1_Mi;
     uint64_t max_freq = 1_Ki;
     uint64_t lz_sampling = 4;
+    uint64_t lz_phrase_suffixes = 1;
     uint64_t window_size = 1_Mi;
 
 public:
@@ -27,6 +28,7 @@ public:
         param('k', "num-frequent", k, "The number of frequent substrings to maintain.");
         param('c', "max-freq", max_freq, "The maximum frequency of a frequent pattern.");
         param('s', "lz-sampling", lz_sampling, "The LZ77 sampling rate (2^value, 0 for exact).");
+        param('z', "lz-phrase-suffixes", lz_phrase_suffixes, "The number of suffixes of LZ77 phrases to enter into the top-k trie.");
         param('w', "window", window_size, "The window size.");
     }
 
@@ -48,7 +50,7 @@ public:
                     output_filename = filename + ".topklz77";
                 }
 
-                zk::TopkLZ77 topk_lz77(k, window_size, max_freq, lz_sampling, block_size);
+                zk::TopkLZ77 topk_lz77(k, window_size, max_freq, lz_sampling, lz_phrase_suffixes, block_size);
                 {
                     iopp::FileInputStream in(filename, 0, n);
                     iopp::FileOutputStream out(output_filename);
