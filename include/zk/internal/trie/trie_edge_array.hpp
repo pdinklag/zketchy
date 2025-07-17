@@ -12,7 +12,7 @@
 namespace zk::internal {
 
 // mantains an array of trie edges
-template<std::integral Character = char, std::unsigned_integral NodeIndex = uint32_t, std::unsigned_integral Size = uint16_t>
+template<std::integral Character = char, std::unsigned_integral NodeIndex = uint32_t>
 class TrieEdgeArray {
 private:
     static constexpr size_t capacity_for(size_t const n) {
@@ -21,6 +21,7 @@ private:
 
     using UCharacter = std::make_unsigned_t<Character>;
     using BitPack = uintmax_t;
+    using Size = UCharacter;
 
     static constexpr size_t bits_per_pack_ = 8 * sizeof(BitPack);
     static constexpr size_t bit_pack_mask_ = bits_per_pack_ - 1;
@@ -133,6 +134,7 @@ private:
 
 public:
     TrieEdgeArray() : size_(0) {
+        data_.inl.labels[0] = 0; // emptiness convention
         data_.ext.links = nullptr;
     }
 
@@ -185,14 +187,23 @@ public:
             data_.ext.links = nullptr;
         }
         size_ = 0;
+        data_.inl.labels[0] = 0; // emptiness convention
+    }
+
+    inline bool is_leaf() const {
+        return size_ == 0 && data_.inl.labels[0] == 0;
     }
 
     inline bool is_inline() const {
-        return size_ <= inline_size_;
+        return is_leaf() || size_ <= inline_size_;
     }
 
-    inline Size size() const {
-        return size_;
+    inline size_t size() const {
+        if(size_ != 0)[[likely]] {
+            return size_;
+        } else {
+            return data_.inl.labels[0] == 0 ? 0 : sigma_;
+        }
     }
 
     size_t allocated_extra_memory() const {
@@ -366,6 +377,10 @@ public:
                     data_.inl.labels[j] = new_labels[j];
                     data_.inl.links[j] = new_links[j];
                 }
+            }
+
+            if(size_ == 0) {
+                data_.inl.labels[0] = 0; // emptiness convention
             }
         } else {
             // "this kid is not my son"

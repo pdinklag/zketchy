@@ -10,9 +10,8 @@ struct BasicTrieNode {
 
     using Character = char;
     using Index = NodeIndex;
-    using Size = uint16_t;
 
-    using ChildArray = TrieEdgeArray<Character, Index, Size>;
+    using ChildArray = TrieEdgeArray<Character, Index>;
 
     ChildArray children;
     Character inlabel;
