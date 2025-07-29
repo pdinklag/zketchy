@@ -22,3 +22,6 @@
 [submodule "extlib/unordered_dense"]
 	path = extlib/unordered_dense
 	url = https://github.com/martinus/unordered_dense.git
+[submodule "extlib/cmdline"]
+	path = extlib/cmdline
+	url = https://github.com/pdinklag/cmdline.git

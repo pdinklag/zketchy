@@ -1,3 +1,4 @@
+add_subdirectory(cmdline)
 add_subdirectory(code)
 add_subdirectory(fp)
 add_subdirectory(iopp)
