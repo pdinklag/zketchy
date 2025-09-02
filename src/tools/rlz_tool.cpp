@@ -3,6 +3,7 @@
 #include <cmdline/program.hpp>
 
 #include <iopp/file_input_stream.hpp>
+#include <iopp/file_output_stream.hpp>
 #include <iopp/load_file.hpp>
 
 #include <zk/rlz_factorizer.hpp>
@@ -11,6 +12,7 @@ class RLZTool : public cmdline::Program {
 private:
     std::string ref_filename;
     std::string text_filename;
+    bool verify;
 
     static void progress(size_t const i, size_t const n, size_t& s) {
         size_t const step = (size_t)(0.05 * double(n));
@@ -26,6 +28,7 @@ public:
     RLZTool() : cmdline::Program("RLZ", "Relative Lempel-Ziv") {
         required_arg("ref", ref_filename);
         required_arg("text", text_filename);
+        option('v', "verify", verify);
     }
 
     int main() {
@@ -36,8 +39,8 @@ public:
         std::cout << std::endl;
         std::cout << "compressing ..." << std::endl;
 
-        size_t const n = std::filesystem::file_size(text_filename);
-        iopp::FileInputStream in(text_filename);
+        auto const text = iopp::load_file_str(text_filename);
+        size_t const n = text.length();
         size_t i = 0;
         size_t s = 1;
         size_t z = 0;
@@ -45,12 +48,29 @@ public:
         size_t z_ref = 0;
         size_t ref_len_sum = 0;
 
-        rlz.factorize(in.begin(), in.end(), [&](lz77::Factor f){
+        std::string dec;
+        if(verify) {
+            dec.reserve(n);
+        }
+
+        rlz.factorize(text.begin(), text.end(), [&](lz77::Factor f){
+            if(verify) {
+                // std::cout << "\ti=" << i << ": literal '" << (char)f.literal() << "'" << std::endl;
+                dec.push_back((char)f.literal());
+            }
+
             ++i; progress(i, n, s);
             ++z;
             ++z_literal;
         },
         [&](lz77::Factor f){
+            if(verify) {
+                // std::cout << "\ti=" << i << ": ref src=" << f.src << ", len=" << f.len << std::endl;
+                for(size_t j = 0; j < f.len; j++) {
+                    dec.push_back(r[f.src + j]);
+                }
+            }
+
             i += f.num_literals(); progress(i, n, s);
             ++z;
             ++z_ref;
@@ -59,6 +79,15 @@ public:
 
         double const ref_len_avg = double(ref_len_sum) / double(z_ref);
         std::cout << "-> z=" << z << " (z_literal=" << z_literal << ", z_ref=" << z_ref << ", ref_len_avg=" << ref_len_avg << ")" << std::endl;
+
+        if(verify) {
+            {
+                iopp::FileOutputStream out(text_filename + ".rlz.dec");
+                out.write(dec.data(), n);
+            }
+            std::cout << "verification result: " << (text == dec) << std::endl;
+        }
+
         return 0;
     }
 };
