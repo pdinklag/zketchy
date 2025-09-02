@@ -76,35 +76,44 @@ public:
 
     template<std::input_iterator Input>
     requires (sizeof(std::iter_value_t<Input>) == 1)
+    lz77::Factor find_reference(Input& it, Input const& end) {
+        // match in reference
+        size_t d = 0;
+        size_t l = 0;
+        size_t r = ref_.length() - 1;
+        char last_literal;
+
+        while(l <= r && it != end) {
+            auto [new_l, new_r] = step(l, r, *it, d);
+            if(new_l <= new_r) {
+                l = new_l;
+                r = new_r;
+                ++d;
+                last_literal = *it++;
+            } else {
+                break;
+            }
+        }
+
+        // we matched d characters
+        if(d > 1) {
+            return lz77::Factor(sa_[l], d);
+        } else if(d == 1) {
+            return lz77::Factor(last_literal);
+        } else {
+            return lz77::Factor(*it++);
+        }
+    }
+
+    template<std::input_iterator Input>
+    requires (sizeof(std::iter_value_t<Input>) == 1)
     void factorize(Input it, Input const& end, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
         while(it != end) {
-            // match in reference
-            size_t d = 0;
-            size_t l = 0;
-            size_t r = ref_.length() - 1;
-            char last_literal;
-
-            while(l <= r && it != end) {
-                auto [new_l, new_r] = step(l, r, *it, d);
-                if(new_l <= new_r) {
-                    l = new_l;
-                    r = new_r;
-                    ++d;
-                    last_literal = *it++;
-                } else {
-                    break;
-                }
-            }
-
-            // we matched d characters
-            if(d > 1) {
-                emit_reference(lz77::Factor(sa_[l], d));
-            } else if(d == 1) {
-                emit_literal(lz77::Factor(last_literal));
+            auto const f = find_reference(it, end);
+            if(f.is_literal()) {
+                emit_literal(f);
             } else {
-                // d == 0
-                emit_literal(lz77::Factor(*it));
-                ++it; // nb: make sure we actually advance
+                emit_reference(f);
             }
         }
     }
