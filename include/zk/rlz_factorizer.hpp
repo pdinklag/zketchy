@@ -21,7 +21,8 @@ private:
 
     uint8_t access(size_t const q, size_t const d) {
         auto const i = sa_[q] + d;
-        return i < ref_.length() ? ref_[i] : 0;
+        //return i < ref_.length() ? ref_[i] : 0; // -- nb: may be necessary if the text contains a 0-byte
+        return ref_[i];
     }
 
     // nb: assumes that min <= x <= max
