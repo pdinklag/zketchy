@@ -13,9 +13,11 @@ class RLZFactorizer {
 private:
     static constexpr size_t MAX_REF_LEN = (1ULL << 31) - 1;
     static constexpr size_t LIN_SEARCH_THRESHOLD = 128;
+    static constexpr size_t SIGMA = 256;
 
     std::string_view ref_;
     std::unique_ptr<int32_t[]> sa_;
+    std::pair<uint32_t, uint32_t> seed_[SIGMA];
 
     uint8_t access(size_t const q, size_t const d) {
         auto const i = sa_[q] + d;
@@ -89,36 +91,58 @@ public:
         // compute index for reference
         sa_ = std::make_unique<int32_t[]>(n);
         libsais((uint8_t const*)ref_.data(), sa_.get(), n, 0, nullptr);
+
+        // compute seed intervals for every possible character
+        for(size_t x = 0; x < SIGMA; x++) {
+            seed_[x] = { n, 0 };
+        }
+
+        {
+            uint8_t x = ref_[sa_[0]];
+            size_t l = 0;
+            for(size_t i = 1; i < n; i++) {
+                uint8_t y = ref_[sa_[i]];
+                if(y != x) {
+                    seed_[x] = { l, i-1 };
+                    x = y;
+                    l = i;
+                }
+            }
+            seed_[x] = { l, n-1 };
+        }
     }
 
     template<std::input_iterator Input>
     requires (sizeof(std::iter_value_t<Input>) == 1)
     lz77::Factor find_reference(Input& it, Input const& end) {
         // match in reference
-        size_t d = 0;
-        size_t l = 0;
-        size_t r = ref_.length() - 1;
-        char last_literal;
+        char last_literal = *it++;
+        size_t l = seed_[uint8_t(last_literal)].first;
+        size_t r = seed_[uint8_t(last_literal)].second;
 
-        while(l <= r && it != end) {
-            auto [new_l, new_r] = step(l, r, *it, d);
-            if(new_l <= new_r) {
-                l = new_l;
-                r = new_r;
-                ++d;
-                last_literal = *it++;
-            } else {
-                break;
-            }
-        }
-
-        // we matched d characters
-        if(d > 1) {
-            return lz77::Factor(sa_[l], d);
-        } else if(d == 1) {
+        if(l > r) {
+            // no matches
             return lz77::Factor(last_literal);
         } else {
-            return lz77::Factor(*it++);
+            size_t d = 1;
+            while(l <= r && it != end) {
+                auto [new_l, new_r] = step(l, r, *it, d);
+                if(new_l <= new_r) {
+                    l = new_l;
+                    r = new_r;
+                    ++d;
+                    last_literal = *it++;
+                } else {
+                    break;
+                }
+            }
+
+            // we matched d characters
+            if(d > 1) {
+                return lz77::Factor(sa_[l], d);
+            } else { // if(d == 1) {
+                return lz77::Factor(last_literal);
+            }
         }
     }
 
