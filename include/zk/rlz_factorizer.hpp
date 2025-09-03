@@ -77,7 +77,7 @@ private:
         if(x > max)[[unlikely]] return {r+1, l};
 
         auto const ll = lmost_or_succ(l, r, x, d);
-        auto const rr = rmost_or_pred(l, r, x, d);
+        auto const rr = rmost_or_pred(ll > 0 ? ll-1 : l, r, x, d);
         return {ll, rr};
     }
 
