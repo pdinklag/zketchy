@@ -12,43 +12,60 @@ namespace zk {
 class RLZFactorizer {
 private:
     static constexpr size_t MAX_REF_LEN = (1ULL << 31) - 1;
+    static constexpr size_t LIN_SEARCH_THRESHOLD = 128;
 
     std::string_view ref_;
     std::unique_ptr<int32_t[]> sa_;
 
     uint8_t access(size_t const q, size_t const d) {
         auto const i = sa_[q] + d;
-        return i < ref_.length() ? ref_[i] : 0; // TODO: is this good?
+        return i < ref_.length() ? ref_[i] : 0;
     }
 
     // nb: assumes that min <= x <= max
     size_t lmost_or_succ(size_t const l, size_t const r, uint8_t const x, size_t const d) {
-        ssize_t a = ssize_t(l)- 1;
-        size_t b = r;
-        while(a + 1 < b) {
-            auto const q = (a + b) / 2;
-            if(access(q, d) < x) {
-                a = q;
-            } else {
-                b = q;
+        if(r - l <= LIN_SEARCH_THRESHOLD) {
+            size_t q = l;
+            while(access(q, d) < x) {
+                ++q;
             }
+            return q;
+        } else {
+            ssize_t a = ssize_t(l)- 1;
+            size_t b = r;
+            while(a + 1 < b) {
+                auto const q = (a + b) / 2;
+                if(access(q, d) < x) {
+                    a = q;
+                } else {
+                    b = q;
+                }
+            }
+            return b;
         }
-        return b;
     }
 
     // nb: assumes that min <= x <= max
     size_t rmost_or_pred(size_t const l, size_t const r, uint8_t const x, size_t const d) {
-        size_t a = l;
-        size_t b = r + 1;
-        while(a + 1 < b) {
-            auto const q = (a + b) / 2;
-            if(access(q, d) <= x) {
-                a = q;
-            } else {
-                b = q;
+        if(r - l <= LIN_SEARCH_THRESHOLD) {
+            size_t q = r;
+            while(access(q, d) > x) {
+                --q;
             }
+            return q;
+        } else {
+            size_t a = l;
+            size_t b = r + 1;
+            while(a + 1 < b) {
+                auto const q = (a + b) / 2;
+                if(access(q, d) <= x) {
+                    a = q;
+                } else {
+                    b = q;
+                }
+            }
+            return a;
         }
-        return a;
     }
 
     std::pair<size_t, size_t> step(size_t const l, size_t const r, uint8_t const x, size_t const d) {
