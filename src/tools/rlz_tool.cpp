@@ -12,7 +12,7 @@ class RLZTool : public cmdline::Program {
 private:
     std::string ref_filename;
     std::string text_filename;
-    bool verify;
+    bool verify = false;
 
     static void progress(size_t const i, size_t const n, size_t& s) {
         size_t const step = (size_t)(0.05 * double(n));
