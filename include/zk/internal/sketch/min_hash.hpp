@@ -87,7 +87,7 @@ public:
         for(size_t i = 0; i < num_hashes_; i++) {
             eq += (sig_[i] == other.sig_[i]);
         }
-        return double(eq) / double(num_hashes_);
+        return double(eq) / double(2 * num_hashes_ - eq);
     }
 };
 
