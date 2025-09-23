@@ -80,18 +80,7 @@ public:
     CScore& operator=(CScore const&) = default;
 
     template<iopp::STLInputStreamLike InputStream>
-    double compute(InputStream& in) {
-        result_ = {};
-        result_.add("len", pattern_len_);
-        result_.add("s", sampling_exp_);
-        result_.add("block_size", block_size_);
-        result_.add("buffer_size", buffer_size_);
-
-        internal::MemoryTimePhase phase_all;
-        internal::TimePhase phase_signatures, phase_similarity;
-        phase_all.start();
-        phase_signatures.start();
-    
+    std::vector<Sig> compute_block_signatures(InputStream& in) {
         RK rk(rolling_fp_base_, pattern_len_);
         size_t const num_threads = omp_get_max_threads();
     
@@ -149,6 +138,23 @@ public:
                 }
             }
         }
+        return block_signatures;
+    }
+
+    template<iopp::STLInputStreamLike InputStream>
+    double compute(InputStream& in) {
+        result_ = {};
+        result_.add("len", pattern_len_);
+        result_.add("s", sampling_exp_);
+        result_.add("block_size", block_size_);
+        result_.add("buffer_size", buffer_size_);
+
+        internal::MemoryTimePhase phase_all;
+        internal::TimePhase phase_signatures, phase_similarity;
+        phase_all.start();
+        phase_signatures.start();
+    
+        auto block_signatures = compute_block_signatures(in);
         phase_signatures.stop();
     
         phase_similarity.start();
