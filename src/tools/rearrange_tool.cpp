@@ -4,6 +4,7 @@
 #include <zk/internal/util/complete_graph.hpp>
 #include <zk/internal/util/si_iec_literals.hpp>
 
+#include <ankerl/unordered_dense.h>
 #include <code/binary.hpp>
 #include <fp/rk31.hpp>
 #include <iopp/bitwise_io.hpp>
@@ -68,8 +69,16 @@ private:
                 }
             }
 
-            size_t const union_size = num_minimizers + other.num_minimizers - cut_size;
+            auto const union_size = num_minimizers + other.num_minimizers - cut_size;
             return double(cut_size) / double(union_size);
+        }
+
+        Fingerprint hash() const {
+            Fingerprint h = 17;
+            for(size_t i = 0; i < num_minimizers; i++) {
+                h = 31 * h + minimizers[i];
+            }
+            return h;
         }
     };
 
@@ -159,7 +168,7 @@ public:
                     // advance block
                     block.advance();
                     p = block.begin();
-                } while(!block.last());
+                } while(!block.empty());
 
                 samples.back().len = n - samples.back().index;
             }
@@ -167,19 +176,42 @@ public:
             if(verbose) {
                 std::cout << "Samples:" << std::endl;
                 for(auto& x : samples) {
-                    std::cout << "\tindex=" << x.index << ", len=" << x.len << ", minimizers=" << x.num_minimizers << std::endl;
+                    std::cout << "\tindex=" << x.index << ", len=" << x.len << ", minimizers=" << x.num_minimizers << ", hash=" << x.hash() << std::endl;
                 }
             }
-
             auto const num_samples = samples.size();
 
+            // cluster
+            std::cout << "cluster samples ..." << std::endl;
+            using Cluster = std::vector<uint32_t>;
+            std::vector<Cluster> clusters;
+            {
+                ankerl::unordered_dense::map<uint32_t, uint32_t> map;
+                for(uint32_t i = 0; i < num_samples; i++) {
+                    auto const h = samples[i].hash();
+
+                    Cluster* cluster;
+                    auto it = map.find(h);
+                    if(it != map.end()) {
+                        cluster = &clusters[it->second];
+                    } else {
+                        map.emplace(h, clusters.size());
+
+                        clusters.emplace_back();
+                        cluster = &clusters.back();
+                    }
+                    cluster->push_back(i);
+                }
+            }
+            auto const num_clusters = clusters.size();
+
             // construct graph
-            std::cout << "construct graph (num_samples=" << num_samples << ") ..." << std::endl;
-            zk::internal::CompleteGraph g(num_samples);
-            for(size_t i = 0; i < num_samples; i++) {
+            std::cout << "construct graph (num_clusters=" << num_clusters << ") ..." << std::endl;
+            zk::internal::CompleteGraph g(num_clusters);
+            for(size_t i = 0; i < num_clusters; i++) {
                 g.dist(i, i) = 0.0f;
-                for(size_t j = i+1; j < num_samples; j++) {
-                    float const sim = float(samples[i].similarity(samples[j]));
+                for(size_t j = i+1; j < num_clusters; j++) {
+                    float const sim = float(samples[clusters[i].front()].similarity(samples[clusters[j].front()]));
                     float const d = 1.0f - sim;
                     g.dist(j, i) = d;
                     g.dist(i, j) = d;
@@ -232,17 +264,21 @@ public:
 
                     write_uint32(tour.size());
                     for(auto v : tour) {
-                        write_uint32(v);
-                        write_uint32(samples[v].len);
+                        for(auto i : clusters[v]) {
+                            write_uint32(i);
+                            write_uint32(samples[i].len);
+                        }
                     }
 
                     // rearrange
                     auto buffer = std::make_unique<char[]>(max_sample_len);
                     for(auto v : tour) {
-                        auto const offs = samples[v].index;
-                        fis.seekg(offs, std::ios::beg);
-                        fis.read(buffer.get(), samples[v].len);
-                        fos.write(buffer.get(), samples[v].len);
+                        for(auto i : clusters[v]) {
+                            auto const offs = samples[i].index;
+                            fis.seekg(offs, std::ios::beg);
+                            fis.read(buffer.get(), samples[i].len);
+                            fos.write(buffer.get(), samples[i].len);
+                        }
                     }
                     // done
                 }
