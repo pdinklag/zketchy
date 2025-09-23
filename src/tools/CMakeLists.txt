@@ -14,6 +14,10 @@ add_executable(slz77-tool slz77_tool.cpp)
 target_link_libraries(slz77-tool ${TBB_LIBRARIES} code fp iopp lz77 pm-malloc oocmd unordered_dense)
 set_target_properties(slz77-tool PROPERTIES OUTPUT_NAME "slz77")
 
+add_executable(rearrange-tool rearrange_tool.cpp)
+target_link_libraries(rearrange-tool zk-cscore code oocmd)
+set_target_properties(rearrange-tool PROPERTIES OUTPUT_NAME "rearrange")
+
 add_executable(rlz-tool rlz_tool.cpp)
 target_link_libraries(rlz-tool cmdline code fp iopp lz77 pm-malloc unordered_dense)
 set_target_properties(rlz-tool PROPERTIES OUTPUT_NAME "rlz")
