@@ -14,6 +14,7 @@ private:
     static constexpr Fingerprint fp_base_ = 257;
 
     bool do_decode = false;
+    bool simple_tour = false;
     size_t sampling = 16_Ki;
     size_t len = 8;
     size_t max_minimizers = 64;
@@ -89,8 +90,9 @@ public:
         param('s', "sample", sampling, "The sampling rate.");
         param('l', "len", len, "The pattern length.");
         param('m', "minimizers", max_minimizers, "The maximum number of minimizers per sample.");
-        param('w', "buffer_size", buffer_size, "The buffer size.");
+        param('w', "buffer-size", buffer_size, "The buffer size.");
         param('p', "prefix", prefix, "Process only this prefix of the input file.");
+        param('x', "simple-tour", simple_tour, "Compute a simpler tour (much faster).");
         param('v', "verbose", verbose, "Print a lot of info.");
         param('o', "out", output_filename, "The output filename.");
     }
@@ -114,7 +116,7 @@ public:
         auto samples = s.sample(fis, buffer_size);
         auto const num_samples = samples.size();
         phase.stop();
-        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
+        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms -> " << num_samples << " samples" << std::endl;
 
         if(verbose) {
             std::cout << "Samples:" << std::endl;
@@ -124,61 +126,70 @@ public:
         }
 
         // cluster
-        std::cout << "cluster samples (num_samples=" << num_samples << ") ... "; std::cout.flush();
+        std::cout << "cluster ... "; std::cout.flush();
 
         phase.start();
         auto clusters = zk::MinimizerSampling::compute_clusters(samples);
         auto const num_clusters = clusters.size();
         phase.stop();
-        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
+        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms -> " << num_clusters << " clusters" << std::endl;
 
-        // construct graph
-        std::cout << "construct graph (num_clusters=" << num_clusters << ") ... "; std::cout.flush();
+        std::vector<uint32_t> tour;
 
-        phase.start();
-        zk::internal::CompleteGraph g(num_clusters);
-        for(size_t i = 0; i < num_clusters; i++) {
-            g.dist(i, i) = 0.0f;
-            for(size_t j = i+1; j < num_clusters; j++) {
-                float const sim = float(clusters[i].similarity(samples, clusters[j]));
-                float const d = 1.0f - sim;
-                g.dist(j, i) = d;
-                g.dist(i, j) = d;
+        if(simple_tour) {
+            tour.reserve(num_clusters);
+            for(uint32_t i = 0; i < num_clusters; i++) {
+                tour.push_back(i);
             }
-        }
-        phase.stop();
-        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
+        } else {
+            // construct graph
+            std::cout << "construct graph ... "; std::cout.flush();
 
-        // nb: similarity is NOT a metric
-        // compute APSP -- SLOW!
-        /*
-        g.all_pairs_shortest_paths();
-        
-        // convert similary to cost
-        for(size_t i = 0; i < num_samples; i++) {
-            for(size_t j = 0; j < num_samples; j++) {
-                g.dist(i, j) = 1.0f - g.dist(i, j);
+            phase.start();
+            zk::internal::CompleteGraph g(num_clusters);
+            for(size_t i = 0; i < num_clusters; i++) {
+                g.dist(i, i) = 0.0f;
+                for(size_t j = i+1; j < num_clusters; j++) {
+                    float const sim = float(clusters[i].similarity(samples, clusters[j]));
+                    float const d = 1.0f - sim;
+                    g.dist(j, i) = d;
+                    g.dist(i, j) = d;
+                }
             }
-        }
-        */
+            phase.stop();
+            std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
 
-        // compute TSP tour via Christofides
-        std::cout << "compute TSP tour ... "; std::cout.flush();
-        phase.start();
-        auto const tour = g.tsp_approx();            
-        phase.stop();
-        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
-
-        if(verbose) {
-            float total_cost = 0;
-            std::cout << std::endl << "tour:" << std::endl;
-            for(size_t i = 1; i < tour.size(); i++) {
-                auto const cost = g.dist(tour[i-1], tour[i]);
-                total_cost += cost;
-
-                std::cout << "\t" << tour[i-1] << " -> " << tour[i] << " (cost " << cost << ")" << std::endl;
+            // nb: similarity is NOT a metric
+            // compute APSP -- SLOW!
+            /*
+            g.all_pairs_shortest_paths();
+            
+            // convert similary to cost
+            for(size_t i = 0; i < num_samples; i++) {
+                for(size_t j = 0; j < num_samples; j++) {
+                    g.dist(i, j) = 1.0f - g.dist(i, j);
+                }
             }
-            std::cout << "-> " << tour.size() << " blocks, total_cost=" << total_cost << std::endl;
+            */
+
+            // compute TSP tour via Christofides        
+            std::cout << "compute TSP tour ... "; std::cout.flush();
+            phase.start();
+            tour = g.tsp_approx();            
+            phase.stop();
+            std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
+
+            if(verbose) {
+                float total_cost = 0;
+                std::cout << std::endl << "tour:" << std::endl;
+                for(size_t i = 1; i < tour.size(); i++) {
+                    auto const cost = g.dist(tour[i-1], tour[i]);
+                    total_cost += cost;
+
+                    std::cout << "\t" << tour[i-1] << " -> " << tour[i] << " (cost " << cost << ")" << std::endl;
+                }
+                std::cout << "-> " << tour.size() << " blocks, total_cost=" << total_cost << std::endl;
+            }
         }
 
         // encode
