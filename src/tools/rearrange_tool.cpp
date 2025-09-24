@@ -1,4 +1,5 @@
 #include <zk/minimizer_sampling.hpp>
+#include <zk/internal/benchmark.hpp>
 #include <zk/internal/util/complete_graph.hpp>
 #include <zk/internal/util/si_iec_literals.hpp>
 
@@ -100,14 +101,20 @@ public:
         iopp::FileInputStream fis(filename, 0, n);
 
         // sample
+        zk::internal::TimePhase phase;
+
         zk::MinimizerSampling s(sampling, len, max_minimizers);
-        std::cout << "scan ..." << std::endl;
+        std::cout << "scan ... "; std::cout.flush();
         if(verbose) {
             std::cout << "\tmin_sample_len=" << s.min_sample_len() << std::endl;
             std::cout << "\tmax_sample_len=" << s.max_sample_len() << std::endl;
         }
+
+        phase.start();
         auto samples = s.sample(fis, buffer_size);
         auto const num_samples = samples.size();
+        phase.stop();
+        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
 
         if(verbose) {
             std::cout << "Samples:" << std::endl;
@@ -117,12 +124,18 @@ public:
         }
 
         // cluster
-        std::cout << "cluster samples (num_samples=" << num_samples << ") ..." << std::endl;
+        std::cout << "cluster samples (num_samples=" << num_samples << ") ... "; std::cout.flush();
+
+        phase.start();
         auto clusters = zk::MinimizerSampling::compute_clusters(samples);
         auto const num_clusters = clusters.size();
+        phase.stop();
+        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
 
         // construct graph
-        std::cout << "construct graph (num_clusters=" << num_clusters << ") ..." << std::endl;
+        std::cout << "construct graph (num_clusters=" << num_clusters << ") ... "; std::cout.flush();
+
+        phase.start();
         zk::internal::CompleteGraph g(num_clusters);
         for(size_t i = 0; i < num_clusters; i++) {
             g.dist(i, i) = 0.0f;
@@ -133,6 +146,8 @@ public:
                 g.dist(i, j) = d;
             }
         }
+        phase.stop();
+        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
 
         // nb: similarity is NOT a metric
         // compute APSP -- SLOW!
@@ -148,8 +163,12 @@ public:
         */
 
         // compute TSP tour via Christofides
-        std::cout << "compute TSP tour ..." << std::endl;
+        std::cout << "compute TSP tour ... "; std::cout.flush();
+        phase.start();
         auto const tour = g.tsp_approx();            
+        phase.stop();
+        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
+
         if(verbose) {
             float total_cost = 0;
             std::cout << std::endl << "tour:" << std::endl;
@@ -163,7 +182,8 @@ public:
         }
 
         // encode
-        std::cout << "encode ..." << std::endl;
+        std::cout << "encode ... "; std::cout.flush();
+        phase.start();
         {
             if(output_filename.empty()) {
                 output_filename = filename + ".rearr";
@@ -204,6 +224,8 @@ public:
                 }
             }
         }
+        phase.stop();
+        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
     }
 
     void decode(std::string const& filename) {
