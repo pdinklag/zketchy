@@ -59,7 +59,7 @@ public:
         }
 
         void insert(Fingerprint const fp) {
-            if(num_minimizers == max_minimizers && fp > minimizers[num_minimizers])[[unlikely]] return;
+            if(fp > minimizers[num_minimizers] && num_minimizers == max_minimizers)[[likely]] return;
 
             MinimizerIndex rank = 0;
             while(rank < num_minimizers && minimizers[rank] < fp) {
