@@ -80,14 +80,14 @@ public:
             size_t cut_size = 0;
             size_t i = 0, j = 0;
             while(i < num_minimizers && j < other.num_minimizers) {
-                if(minimizers[i] < other.minimizers[j]) {
-                    ++i;
-                } else if(minimizers[i] > other.minimizers[j]) {
-                    ++j;
-                } else {
+                if(minimizers[i] == other.minimizers[j]) {
                     ++cut_size;
                     ++i;
                     ++j;
+                } else {
+                    bool const b = minimizers[i] < other.minimizers[j];
+                    i += b;
+                    j += !b;
                 }
             }
 
