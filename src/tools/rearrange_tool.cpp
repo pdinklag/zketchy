@@ -1,11 +1,7 @@
-#include <bit>
-
-#include <zk/internal/io/overlapping_blocks.hpp>
+#include <zk/minimizer_sampling.hpp>
 #include <zk/internal/util/complete_graph.hpp>
 #include <zk/internal/util/si_iec_literals.hpp>
 
-#include <ankerl/unordered_dense.h>
-#include <fp/rk31.hpp>
 #include <iopp/bitwise_io.hpp>
 #include <iopp/file_input_stream.hpp>
 #include <iopp/file_output_stream.hpp>
@@ -104,72 +100,14 @@ public:
         iopp::FileInputStream fis(filename, 0, n);
 
         // sample
+        zk::MinimizerSampling s(sampling, len, max_minimizers);
         std::cout << "scan ..." << std::endl;
-
-        size_t const min_sample_len = std::bit_floor(sampling / 3); // rate * (1/3)
-        size_t const max_sample_len = 9 * min_sample_len; // rate * 3
-
         if(verbose) {
-            std::cout << "\tmin_sample_len=" << min_sample_len << std::endl;
-            std::cout << "\tmax_sample_len=" << max_sample_len << std::endl;
+            std::cout << "\tmin_sample_len=" << s.min_sample_len() << std::endl;
+            std::cout << "\tmax_sample_len=" << s.max_sample_len() << std::endl;
         }
-
-        std::vector<Sample> samples;
-        {
-            Fingerprint const s = 2 * min_sample_len - 1; // rate * (2/3)
-
-            // initialize I/O
-            zk::internal::OverlappingBlocks block(fis, buffer_size, len);
-            if(block.size() < len) std::abort();
-            char const* p = block.begin();
-
-            // initialize fingerprinting
-            fp::RabinKarp31 rk(fp_base_, len);
-            Fingerprint fp = 0;
-
-            size_t i = 0;
-            for(; i < len; i++) {
-                fp = rk.push(fp, *p++);
-            }
-
-            // initialize samples
-            samples.emplace_back(0, max_minimizers);
-            samples.back().insert(fp, max_minimizers);
-
-            // process blocks
-            size_t next_allowed = min_sample_len;
-            size_t next_mandatory = max_sample_len;
-
-            do {
-                if(block.empty()) continue;
-
-                while(p < block.end()) {
-                    // read next character
-                    fp = rk.roll(fp, *(p - len), *p);
-
-                    if(((fp & s) == 0 && i >= next_allowed) || i >= next_mandatory) {
-                        // finalize previous sample
-                        size_t const new_beg = i - len + 1;
-                        samples.back().len = new_beg - samples.back().index;
-                        samples.emplace_back(new_beg, max_minimizers);
-
-                        next_allowed = new_beg + min_sample_len;
-                        next_mandatory = new_beg + max_sample_len;
-                    }
-                    samples.back().insert(fp, max_minimizers);
-
-                    // advance character
-                    ++i;
-                    ++p;
-                }
-
-                // advance block
-                block.advance();
-                p = block.begin();
-            } while(!block.empty());
-
-            samples.back().len = n - samples.back().index;
-        }
+        auto samples = s.sample(fis, buffer_size);
+        auto const num_samples = samples.size();
 
         if(verbose) {
             std::cout << "Samples:" << std::endl;
@@ -177,30 +115,10 @@ public:
                 std::cout << "\tindex=" << x.index << ", len=" << x.len << ", minimizers=" << x.num_minimizers << ", hash=" << x.hash() << std::endl;
             }
         }
-        auto const num_samples = samples.size();
 
         // cluster
         std::cout << "cluster samples (num_samples=" << num_samples << ") ..." << std::endl;
-        using Cluster = std::vector<uint32_t>;
-        std::vector<Cluster> clusters;
-        {
-            ankerl::unordered_dense::map<uint32_t, uint32_t> map;
-            for(uint32_t i = 0; i < num_samples; i++) {
-                auto const h = samples[i].hash();
-
-                Cluster* cluster;
-                auto it = map.find(h);
-                if(it != map.end()) {
-                    cluster = &clusters[it->second];
-                } else {
-                    map.emplace(h, clusters.size());
-
-                    clusters.emplace_back();
-                    cluster = &clusters.back();
-                }
-                cluster->push_back(i);
-            }
-        }
+        auto clusters = zk::MinimizerSampling::compute_clusters(samples);
         auto const num_clusters = clusters.size();
 
         // construct graph
@@ -209,7 +127,7 @@ public:
         for(size_t i = 0; i < num_clusters; i++) {
             g.dist(i, i) = 0.0f;
             for(size_t j = i+1; j < num_clusters; j++) {
-                float const sim = float(samples[clusters[i].front()].similarity(samples[clusters[j].front()]));
+                float const sim = float(clusters[i].similarity(samples, clusters[j]));
                 float const d = 1.0f - sim;
                 g.dist(j, i) = d;
                 g.dist(i, j) = d;
@@ -266,7 +184,7 @@ public:
 
                 size_t count = 0;
                 for(auto v : tour) {
-                    for(auto i : clusters[v]) {
+                    for(auto i : clusters[v].sample_indices) {
                         ++count;
                         write_uint32(i);
                         write_uint32(samples[i].len);
@@ -276,9 +194,9 @@ public:
             }
 
             // rearrange
-            auto buffer = std::make_unique<char[]>(max_sample_len);
+            auto buffer = std::make_unique<char[]>(s.max_sample_len());
             for(auto v : tour) {
-                for(auto i : clusters[v]) {
+                for(auto i : clusters[v].sample_indices) {
                     auto const offs = samples[i].index;
                     fis.seekg(offs, std::ios::beg);
                     fis.read(buffer.get(), samples[i].len);
