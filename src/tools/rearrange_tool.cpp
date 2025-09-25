@@ -14,11 +14,11 @@ private:
     static constexpr Fingerprint fp_base_ = 257;
 
     bool do_decode = false;
-    bool simple_tour = false;
     size_t sampling = 16_Ki;
     size_t len = 8;
     size_t max_minimizers = 64;
     size_t buffer_size = 64_Mi;
+    double tsp_threshold = 0.75;
     size_t prefix = SIZE_MAX;
     bool verbose = false;
     std::string output_filename;
@@ -92,7 +92,7 @@ public:
         param('m', "minimizers", max_minimizers, "The maximum number of minimizers per sample.");
         param('w', "buffer-size", buffer_size, "The buffer size.");
         param('p', "prefix", prefix, "Process only this prefix of the input file.");
-        param('x', "simple-tour", simple_tour, "Compute a simpler tour (much faster).");
+        param('t', "tsp-threshold", tsp_threshold, "Use an arbitrary tour over TSP if the cluster ratio goes above this value.");
         param('v', "verbose", verbose, "Print a lot of info.");
         param('o', "out", output_filename, "The output filename.");
     }
@@ -131,12 +131,14 @@ public:
         phase.start();
         auto clusters = zk::MinimizerSampling::compute_clusters(samples);
         auto const num_clusters = clusters.size();
+        auto const cluster_ratio = double(num_clusters) / double(num_samples);
         phase.stop();
-        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms -> " << num_clusters << " clusters" << std::endl;
+        std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms -> " << num_clusters << " clusters (ratio=" << cluster_ratio << ")" << std::endl;
 
         std::vector<uint32_t> tour;
 
-        if(simple_tour) {
+        if(cluster_ratio > tsp_threshold) {
+            std::cout << "continuing with arbitrary tour due to a large amount of clusters" << std::endl;
             tour.reserve(num_clusters);
             for(uint32_t i = 0; i < num_clusters; i++) {
                 tour.push_back(i);
@@ -197,7 +199,7 @@ public:
         phase.start();
         {
             if(output_filename.empty()) {
-                output_filename = filename + ".rearr";
+                output_filename = filename + ".re";
             }
 
             // encode tour
