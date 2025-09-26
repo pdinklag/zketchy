@@ -98,19 +98,19 @@ public:
     }
 
     void encode(std::string const& filename) {
-        size_t const n = std::min(std::filesystem::file_size(filename), prefix);
+        pm::Result result;
+        zk::internal::TimePhase phase;
 
+        size_t const n = std::min(std::filesystem::file_size(filename), prefix);
         iopp::FileInputStream fis(filename, 0, n);
 
         // sample
-        zk::internal::TimePhase phase;
-
         zk::MinimizerSampling s(sampling, len, max_minimizers);
+        result.add("min_sample_len", s.min_sample_len());
+        result.add("max_sample_len", s.max_sample_len());
+        result.add("max_minimizers", max_minimizers);
+
         std::cout << "scan ... "; std::cout.flush();
-        if(verbose) {
-            std::cout << "\tmin_sample_len=" << s.min_sample_len() << std::endl;
-            std::cout << "\tmax_sample_len=" << s.max_sample_len() << std::endl;
-        }
 
         phase.start();
         auto samples = s.sample(fis, buffer_size);
@@ -134,6 +134,10 @@ public:
         auto const cluster_ratio = double(num_clusters) / double(num_samples);
         phase.stop();
         std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms -> " << num_clusters << " clusters (ratio=" << cluster_ratio << ")" << std::endl;
+
+        result.add("num_samples", num_samples);
+        result.add("num_clusters", num_clusters);
+        result.add("cluster_ratio", cluster_ratio);
 
         std::vector<uint32_t> tour;
 
@@ -239,6 +243,8 @@ public:
         }
         phase.stop();
         std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
+
+        result.print();
     }
 
     void decode(std::string const& filename) {
@@ -304,6 +310,8 @@ public:
                 fos.write(buffer.get(), x.len);
             }
         }
+
+        
     }
 
     int run(oocmd::Application const& app) {
