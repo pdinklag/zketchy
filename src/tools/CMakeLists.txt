@@ -29,3 +29,7 @@ set_target_properties(rlz-tool PROPERTIES OUTPUT_NAME "rlz")
 add_executable(topk-lz77-tool topk_lz77_tool.cpp)
 target_link_libraries(topk-lz77-tool zk-topk-lz77 cmdline)
 set_target_properties(topk-lz77-tool PROPERTIES OUTPUT_NAME "topk-lz77")
+
+add_executable(topk-lz78-tool topk_lz78_tool.cpp)
+target_link_libraries(topk-lz78-tool zk-topk-lz78 cmdline)
+set_target_properties(topk-lz78-tool PROPERTIES OUTPUT_NAME "topk-lz78")
