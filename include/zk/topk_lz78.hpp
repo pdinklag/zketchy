@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iopp/stream_input_iterator.hpp>
+#include <iopp/stream_output_iterator.hpp>
 
 #include "internal/benchmark.hpp"
 #include "internal/io/block_coding.hpp"
@@ -122,7 +123,55 @@ public:
     }
 
     template<iopp::BitSource In, iopp::STLOutputStreamLike OutputStream>
-    static void decompress(In in, OutputStream& out) {
+    static void decompress(In in, OutputStream& outs) {
+        iopp::StreamOutputIterator out(outs);
+
+        // decode header
+        uint64_t const magic = in.read(64);
+        if(magic != MAGIC) {
+            std::cerr << "wrong magic: 0x" << std::hex << magic << " (expected: 0x" << MAGIC << ")" << std::endl;
+            std::abort();
+        }
+
+        auto const k = in.read(64);
+        auto const max_freq = in.read(64);
+
+        // initialize decompression
+        // - frequent substring 0 is reserved to indicate a literal character
+        Topk topk(k - 1, max_freq);
+
+        size_t n = 0;
+        size_t z = 0;
+
+        // initialize decoding
+        internal::BlockDecoder dec(in);
+        setup_encoding(dec, k);
+
+        char* phrase = new char[k]; // phrases can be of length up to k...
+        while(in) {
+            // decode and handle phrase
+            auto const x = dec.read_uint(TOK_REF);
+            auto const phrase_len = topk.get(x, phrase);
+            
+            ++z;
+            n += phrase_len;
+
+            auto s = topk.empty_string();
+            for(size_t i = 0; i < phrase_len; i++) {
+                auto const c = phrase[i];
+                s = topk.extend(s, c);
+                *out++ = c;
+            }
+
+            // decode and handle literal
+            if(in)
+            {
+                auto const literal = dec.read_char(TOK_LITERAL);
+                topk.extend(s, literal);
+                *out++ = literal;
+                ++n;
+            }
+        }
     }
 
     auto&& consume_last_result() {
