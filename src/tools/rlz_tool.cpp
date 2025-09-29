@@ -31,7 +31,7 @@ public:
         option('v', "verify", verify);
     }
 
-    int main() {
+    virtual int main() override {
         std::cout << "building index ..."; std::cout.flush();
         auto r = iopp::load_file_str(ref_filename);
         zk::RLZFactorizer rlz(r);
@@ -93,6 +93,5 @@ public:
 };
 
 int main(int argc, char** argv) {
-    RLZTool rlz;
-    rlz.run([&](){ return rlz.main(); }, argc, argv);
+    return RLZTool().run(argc, argv);
 }

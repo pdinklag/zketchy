@@ -10,4 +10,4 @@ target_link_libraries(zk-topk-lz77 INTERFACE ${TBB_LIBRARIES} code fp iopp lz77 
 add_subdirectory(tools)
 
 add_executable(zk zk.cpp)
-target_link_libraries(zk zk-cscore zk-psamplz zk-topk-lz77 oocmd)
+target_link_libraries(zk zk-cscore zk-psamplz zk-topk-lz77 cmdline)

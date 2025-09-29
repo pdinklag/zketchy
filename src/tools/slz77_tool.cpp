@@ -1,4 +1,4 @@
-#include <oocmd.hpp>
+#include <cmdline/program.hpp>
 #include <iopp/bitwise_io.hpp>
 #include <iopp/load_file.hpp>
 #include <iopp/file_output_stream.hpp>
@@ -10,7 +10,7 @@
 
 #include <zk/internal/benchmark.hpp>
 
-class SLZ77Tool : public oocmd::ConfigObject {
+class SLZ77Tool : public cmdline::Program {
 private:
     static constexpr uint64_t MAGIC =
         ((uint64_t)'S') << 24 |
@@ -28,6 +28,7 @@ private:
         enc.register_binary(n, false);   // TOK_REF_SRC
     }
 
+    std::string filename;
     std::string output_filename;
     bool decompress = false;
     
@@ -68,103 +69,96 @@ private:
     }
 
 public:
-    SLZ77Tool() : oocmd::ConfigObject("LZ77", "Compute and encode the exact LZ77 factorization") {
-        param('s', "sampling", sampling, "The sampling rate (2^value).");
-        param('l', "len", fp_window, "The fingerprint window size.");
-        param('b', "block-size", block_size, "The block size for encoding.");
-        param('p', "prefix", prefix, "Process only this prefix of the input file.");
-        param('o', "out", output_filename, "The output filename.");
-        param('d', "decompress", decompress, "Decompress the input file rather than compressing it.");
-        param("count", count_only, "Only count the factors, don't actually write to the output file.");
+    SLZ77Tool() : cmdline::Program("LZ77", "Compute and encode the exact LZ77 factorization") {
+        required_arg("file", filename, "The input file.");
+        option('s', "sampling", sampling, "The sampling rate (2^value).");
+        option('l', "len", fp_window, "The fingerprint window size.");
+        option('b', "block-size", block_size, "The block size for encoding.");
+        option('p', "prefix", prefix, "Process only this prefix of the input file.");
+        option('o', "out", output_filename, "The output filename.");
+        option('d', "decompress", decompress, "Decompress the input file rather than compressing it.");
+        option("count", count_only, "Only count the factors, don't actually write to the output file.");
     }
 
-    int run(oocmd::Application const& app) {
-        if(!app.args().empty()) {
-            auto const& filename = app.args()[0];
+    virtual int main() override {
+        if(decompress) {
+            if(output_filename.empty()) {
+                output_filename = filename + ".dec";
+            }
 
-            if(decompress) {
-                if(output_filename.empty()) {
-                    output_filename = filename + ".dec";
+            std::string s;
+            {
+                iopp::FileInputStream fin(filename);
+                auto in = iopp::bitwise_input_from(fin);
+
+                uint64_t const magic = in.read(32);
+                if(magic != MAGIC) {
+                    std::cerr << "wrong magic: 0x" << std::hex << magic << " (expected: 0x" << MAGIC << ")" << std::endl;
+                    std::abort();
                 }
 
-                std::string s;
-                {
-                    iopp::FileInputStream fin(filename);
-                    auto in = iopp::bitwise_input_from(fin);
+                auto const n = in.read(64);
+                zk::internal::BlockDecoder dec(in);
+                setup_encoding(dec, n);
 
-                    uint64_t const magic = in.read(32);
-                    if(magic != MAGIC) {
-                        std::cerr << "wrong magic: 0x" << std::hex << magic << " (expected: 0x" << MAGIC << ")" << std::endl;
-                        std::abort();
-                    }
-
-                    auto const n = in.read(64);
-                    zk::internal::BlockDecoder dec(in);
-                    setup_encoding(dec, n);
-
-                    while(in) {
-                        auto const len = dec.read_uint(TOK_REF_LEN);
-                        if(len == 0) {
-                            s.push_back(dec.read_char(TOK_LITERAL));
-                        } else {
-                            auto const src = s.length() - dec.read_uint(TOK_REF_SRC);
-                            for(size_t i = 0; i < len; i++) {
-                                s.push_back(s[src + i]);
-                            }
+                while(in) {
+                    auto const len = dec.read_uint(TOK_REF_LEN);
+                    if(len == 0) {
+                        s.push_back(dec.read_char(TOK_LITERAL));
+                    } else {
+                        auto const src = s.length() - dec.read_uint(TOK_REF_SRC);
+                        for(size_t i = 0; i < len; i++) {
+                            s.push_back(s[src + i]);
                         }
                     }
                 }
-
-                iopp::FileOutputStream fout(output_filename);
-                fout.write(s.data(), s.length());
-            } else {
-                zk::internal::MemoryTimePhase t;
-
-                size_t const n = std::min(std::filesystem::file_size(filename), prefix);
-
-                if(output_filename.empty()) {
-                    output_filename = filename + ".slz77";
-                }
-
-                size_t z = 0;
-                
-                {
-                    auto s = iopp::load_file_str(filename, n);
-                    
-                    zk::SampledLPFFactorizer lz77(sampling, fp_window);
-                    t.start();
-                    if(!count_only) {
-                        iopp::FileOutputStream fout(output_filename);
-                        auto out = iopp::bitwise_output_to(fout);
-
-                        zk::internal::BlockEncoder enc(out, block_size);
-
-                        out.write(MAGIC, 32);
-                        out.write(n, 64);
-                        setup_encoding(enc, n);
-
-                        z = factorize(lz77, s, enc);
-
-                        enc.flush();
-                    } else {
-                        z = factorize(lz77, s);
-                    }
-                    t.stop();
-                }
-                
-                if constexpr(zk::internal::do_benchmark) {                
-                    std::cout << "n=" << n << ", z=" << z << ", t=" << t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", m=" << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << std::endl;
-                }
             }
-            return 0;
+
+            iopp::FileOutputStream fout(output_filename);
+            fout.write(s.data(), s.length());
         } else {
-            app.print_usage(*this);
-            return -1;
+            zk::internal::MemoryTimePhase t;
+
+            size_t const n = std::min(std::filesystem::file_size(filename), prefix);
+
+            if(output_filename.empty()) {
+                output_filename = filename + ".slz77";
+            }
+
+            size_t z = 0;
+            
+            {
+                auto s = iopp::load_file_str(filename, n);
+                
+                zk::SampledLPFFactorizer lz77(sampling, fp_window);
+                t.start();
+                if(!count_only) {
+                    iopp::FileOutputStream fout(output_filename);
+                    auto out = iopp::bitwise_output_to(fout);
+
+                    zk::internal::BlockEncoder enc(out, block_size);
+
+                    out.write(MAGIC, 32);
+                    out.write(n, 64);
+                    setup_encoding(enc, n);
+
+                    z = factorize(lz77, s, enc);
+
+                    enc.flush();
+                } else {
+                    z = factorize(lz77, s);
+                }
+                t.stop();
+            }
+            
+            if constexpr(zk::internal::do_benchmark) {                
+                std::cout << "n=" << n << ", z=" << z << ", t=" << t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", m=" << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << std::endl;
+            }
         }
+        return 0;
     }
 };
 
 int main(int argc, char** argv) {
-    SLZ77Tool app;
-    return oocmd::Application::run(app, argc, argv);
+    return SLZ77Tool().run(argc, argv);
 }

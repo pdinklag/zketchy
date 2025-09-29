@@ -4,9 +4,6 @@
 [submodule "extlib/fp"]
 	path = extlib/fp
 	url = https://github.com/pdinklag/fp.git
-[submodule "extlib/oocmd"]
-	path = extlib/oocmd
-	url = https://github.com/pdinklag/oocmd.git
 [submodule "extlib/pm"]
 	path = extlib/pm
 	url = https://github.com/pdinklag/pm.git

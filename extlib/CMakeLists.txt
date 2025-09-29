@@ -3,7 +3,6 @@ add_subdirectory(code)
 add_subdirectory(fp)
 add_subdirectory(iopp)
 add_subdirectory(lz77)
-add_subdirectory(oocmd)
 add_subdirectory(pm)
 add_subdirectory(word-packing)
 

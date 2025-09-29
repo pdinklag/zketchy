@@ -6,9 +6,10 @@
 #include <iopp/bitwise_io.hpp>
 #include <iopp/file_input_stream.hpp>
 #include <iopp/file_output_stream.hpp>
-#include <oocmd.hpp>
 
-class RearrangeTool : public oocmd::ConfigObject {
+#include <cmdline/program.hpp>
+
+class RearrangeTool : public cmdline::Program {
 private:
     using Fingerprint = fp::RabinKarp31::Fingerprint;
     static constexpr Fingerprint fp_base_ = 257;
@@ -21,6 +22,8 @@ private:
     double tsp_threshold = 0.75;
     size_t prefix = SIZE_MAX;
     bool verbose = false;
+
+    std::string filename;
     std::string output_filename;
 
     struct Sample {
@@ -85,19 +88,20 @@ private:
     } __attribute__((packed));
 
 public:
-    RearrangeTool() : oocmd::ConfigObject("Rearrange", "Rearrange blocks of the input according to their similarity") {
-        param('d', "decode", do_decode, "Decode the input.");
-        param('s', "sample", sampling, "The sampling rate.");
-        param('l', "len", len, "The pattern length.");
-        param('m', "minimizers", max_minimizers, "The maximum number of minimizers per sample.");
-        param('w', "buffer-size", buffer_size, "The buffer size.");
-        param('p', "prefix", prefix, "Process only this prefix of the input file.");
-        param('t', "tsp-threshold", tsp_threshold, "Use an arbitrary tour over TSP if the cluster ratio goes above this value.");
-        param('v', "verbose", verbose, "Print a lot of info.");
-        param('o', "out", output_filename, "The output filename.");
+    RearrangeTool() : cmdline::Program("Rearrange", "Rearrange blocks of the input according to their similarity") {
+        required_arg("file", filename, "The input file.");
+        option('d', "decode", do_decode, "Decode the input.");
+        option('s', "sample", sampling, "The sampling rate.");
+        option('l', "len", len, "The pattern length.");
+        option('m', "minimizers", max_minimizers, "The maximum number of minimizers per sample.");
+        option('w', "buffer-size", buffer_size, "The buffer size.");
+        option('p', "prefix", prefix, "Process only this prefix of the input file.");
+        option('t', "tsp-threshold", tsp_threshold, "Use an arbitrary tour over TSP if the cluster ratio goes above this value.");
+        option('v', "verbose", verbose, "Print a lot of info.");
+        option('o', "out", output_filename, "The output filename.");
     }
 
-    void encode(std::string const& filename) {
+    void encode() {
         pm::Result result;
         zk::internal::TimePhase phase;
 
@@ -247,7 +251,7 @@ public:
         result.print();
     }
 
-    void decode(std::string const& filename) {
+    void decode() {
         // decode tour
         iopp::FileInputStream fis(filename);
 
@@ -314,22 +318,16 @@ public:
         
     }
 
-    int run(oocmd::Application const& app) {
-        if(!app.args().empty()) {
-            if(do_decode) {
-                decode(app.args()[0]);
-            } else {
-                encode(app.args()[0]);
-            }
-            return 0;
+    virtual int main() override {
+        if(do_decode) {
+            decode();
         } else {
-            app.print_usage(*this);
-            return -1;
+            encode();
         }
+        return 0;
     }
 };
 
 int main(int argc, char** argv) {
-    RearrangeTool app;
-    return oocmd::Application::run(app, argc, argv);
+    return RearrangeTool().run(argc, argv);
 }
