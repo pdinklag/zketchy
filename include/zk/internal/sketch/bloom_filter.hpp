@@ -48,6 +48,11 @@ private:
     }
 
 public:
+    static size_t memory_usage(size_t const size) {
+        auto const num_packs = word_packing::num_packs_required<uintmax_t>(size, 1);
+        return num_packs * sizeof(uintmax_t);
+    }
+
     BloomFilter() : mask_(0) {
     }
 

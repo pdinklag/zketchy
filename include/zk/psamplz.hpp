@@ -355,7 +355,11 @@ private:
         result_.add("bloom_fpr", double(cht_total_stats.false_positives) / double(cht_total_stats.bloom_lookups));
         result_.add("refs", refs.size());
         result_.add("t", stats_.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
+
+        size_t const mem = stats_.get_metric<pm::MallocCounter::MemoryPeakMetric>();
+        double const exp_num_fingerprints = double(n) / double(1ULL << sampling_);
         result_.add("mem_peak", stats_.get_metric<pm::MallocCounter::MemoryPeakMetric>());
+        result_.add("mem_avg_per_fp", double(mem - BloomFilter::memory_usage(bloom_filter_size) - window_size_) / double(exp_num_fingerprints));
         return refs;
     }
 
