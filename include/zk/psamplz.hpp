@@ -347,6 +347,7 @@ private:
             stats_.append_child(phase_sample_and_parse);
         }
 
+        stats_.stop();
         result_.add("p", num_threads);
         result_.add("sampling", sampling_);
         result_.add("window", window_size);
