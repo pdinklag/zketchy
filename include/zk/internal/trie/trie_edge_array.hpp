@@ -128,7 +128,7 @@ private:
             while(found < size_ && data_.inl.labels[found] != label) ++found;
             return found;
         } else {
-            return data_.ext.get(label) ? data_.ext.rank(label) : size_;
+            return data_.ext.get(label) ? data_.ext.rank(label) : size();
         }
     }
 
@@ -156,8 +156,9 @@ public:
 
         if(!other.is_inline()) {
             // deep copy of links
-            data_.ext.links = new NodeIndex[capacity_for(size_)];
-            for(size_t i = 0; i < size_; i++) {
+            auto const sz = size();
+            data_.ext.links = new NodeIndex[capacity_for(sz)];
+            for(size_t i = 0; i < sz; i++) {
                 data_.ext.links[i] = other.data_.ext.links[i];
             }
         }
@@ -195,7 +196,7 @@ public:
     }
 
     inline bool is_inline() const {
-        return is_leaf() || size_ <= inline_size_;
+        return size() <= inline_size_;
     }
 
     inline size_t size() const {
@@ -259,7 +260,7 @@ public:
                 }
             }
         } else {
-            for(NodeIndex i = 0; i < size_; i++) {
+            for(NodeIndex i = 0; i < size(); i++) {
                 if(data_.ext.links[i] == what) {
                     child_index = i;
                     return true;
@@ -270,12 +271,14 @@ public:
     }
 
     void insert(Character const label, NodeIndex const link) {
+        assert(size() < sigma_);
+
         // possibly allocate slots
         // nb: because we are only keeping track of the size and assume the capacity to always be its hyperceil,
         //     we may re-allocate here even though it would not be necessary
         //     however, if there were many removals, this may also (unknowingly) actually shrink the capacity
         //     in any event: it's not a bug, it's a feature!
-        if(size_ == inline_size_ || (!is_inline() && size_ == capacity_for(size_))) {
+        if(size_ == inline_size_ || (!is_inline() && size_ == capacity_for(size_))) { // nb: size_ == capacity_for(size_) will never be true if size() == 256, because then, size_ == 0
             auto* new_links = new NodeIndex[capacity_for(size_ + 1)];
             if(is_inline()) {
                 assert(size_ == inline_size_);
@@ -308,26 +311,28 @@ public:
         }
         
         // insert
-        ++size_;
+        ++size_; // nb: size might overflow to zero, which is fine
         if(is_inline()) {
             auto const i = size_ - 1;
             data_.inl.labels[i] = label;
             data_.inl.links[i] = link;
+            assert(contains(link));
         } else {
             data_.ext.set(label);
-            assert(size_ == data_.ext.size());
+            assert(size() == data_.ext.size());
 
             auto const i = data_.ext.rank(label);
-            for(size_t j = size_ - 1; j > i; j--) {
+            for(size_t j = size() - 1; j > i; j--) {
                 data_.ext.links[j] = data_.ext.links[j - 1];
             }
             data_.ext.links[i] = link;
+            assert(contains(link));
         }
-
-        assert(contains(link));
     }
 
     void remove(Character const label) {
+        assert(size() > 0);
+
         auto const i = find(label);
         if(i < size_) {
             // remove from link array if necessary
@@ -341,10 +346,11 @@ public:
             } else {
                 // remove
                 data_.ext.unset(label);
-                assert(data_.ext.size() == size_ - 1);
+                assert(data_.ext.size() == size() - 1);
 
-                if(size_ > 1) {
-                    for(size_t j = i; j + 1 < size_; j++) {
+                auto const sz = size();
+                if(sz > 1) {
+                    for(size_t j = i; j + 1 < sz; j++) {
                         data_.ext.links[j] = data_.ext.links[j+1];
                     }
                 }
@@ -352,7 +358,7 @@ public:
 
             // possibly convert into inline node
             auto const was_inline = is_inline();
-            --size_; // nb: must be done before moving data
+            --size_; // nb: must be done before moving data; also might underflow, which is fine
 
             if(!was_inline && is_inline()) {
                 assert(size_ == inline_size_);
