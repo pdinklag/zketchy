@@ -124,9 +124,15 @@ public:
 
         if(verbose) {
             std::cout << "Samples:" << std::endl;
+
+            size_t cumulative_len = 0;
             for(auto& x : samples) {
-                std::cout << "\tindex=" << x.index << ", len=" << x.len << ", minimizers=" << x.num_minimizers << ", hash=" << x.hash() << std::endl;
+                cumulative_len += x.len;
+                // std::cout << "\tindex=" << x.index << ", len=" << x.len << ", minimizers=" << x.num_minimizers << ", hash=" << x.hash() << std::endl;
             }
+            
+            auto const avg_len = double(cumulative_len) / double(samples.size());
+            std::cout << "\tavg_len = " << avg_len << std::endl;
         }
 
         // cluster
@@ -188,18 +194,6 @@ public:
             tour = g.tsp_approx();            
             phase.stop();
             std::cout << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
-
-            if(verbose) {
-                float total_cost = 0;
-                std::cout << std::endl << "tour:" << std::endl;
-                for(size_t i = 1; i < tour.size(); i++) {
-                    auto const cost = g.dist(tour[i-1], tour[i]);
-                    total_cost += cost;
-
-                    std::cout << "\t" << tour[i-1] << " -> " << tour[i] << " (cost " << cost << ")" << std::endl;
-                }
-                std::cout << "-> " << tour.size() << " blocks, total_cost=" << total_cost << std::endl;
-            }
         }
 
         // encode
@@ -305,17 +299,11 @@ public:
             auto buffer = std::make_unique<char[]>(longest);
 
             for(auto const& x : samples) {
-                if(verbose) {
-                    std::cout << "\tindex=" << x.index << ", rank=" << x.rank << ", len=" << x.len << std::endl;
-                }
-
                 fis.seekg(offset + x.index, std::ios::beg);
                 fis.read(buffer.get(), x.len);
                 fos.write(buffer.get(), x.len);
             }
         }
-
-        
     }
 
     virtual int main() override {
