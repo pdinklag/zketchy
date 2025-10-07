@@ -16,7 +16,7 @@ class MinimizerSampling {
 public:
     using Fingerprint = fp::RabinKarp31::Fingerprint;
     using TextIndex = size_t;
-    using SampleIndex = uint32_t;
+    using SampleIndex = size_t;
     using MinimizerIndex = uint16_t;
 
     struct Sample {
@@ -59,7 +59,7 @@ public:
         }
 
         void insert(Fingerprint const fp) {
-            if(fp > minimizers[num_minimizers] && num_minimizers == max_minimizers)[[likely]] return;
+            if(num_minimizers == max_minimizers && fp > minimizers[num_minimizers-1])[[likely]] return;
 
             MinimizerIndex rank = 0;
             while(rank < num_minimizers && minimizers[rank] < fp) {
@@ -70,7 +70,7 @@ public:
                 ++num_minimizers;
             }
 
-            for(size_t i = num_minimizers; i > rank; i--) {
+            for(size_t i = num_minimizers - 1; i > rank; i--) {
                 minimizers[i] = minimizers[i-1];
             }
             minimizers[rank] = fp;
@@ -116,8 +116,8 @@ public:
         std::vector<Cluster> clusters;
         auto const num_samples = samples.size();
 
-        ankerl::unordered_dense::map<uint32_t, uint32_t> map;
-        for(uint32_t i = 0; i < num_samples; i++) {
+        ankerl::unordered_dense::map<SampleIndex, size_t> map;
+        for(SampleIndex i = 0; i < num_samples; i++) {
             auto const h = samples[i].hash();
 
             Cluster* cluster;
@@ -131,8 +131,19 @@ public:
                 cluster = &clusters.back();
             }
             cluster->sample_indices.push_back(i);
-            }
+        }
         return clusters;
+    }
+
+    static size_t count_clusters(std::vector<Sample> const& samples) {
+        size_t num_clusters = 0;
+        auto const num_samples = samples.size();
+
+        ankerl::unordered_dense::set<SampleIndex> set;
+        for(SampleIndex i = 0; i < num_samples; i++) {
+            set.emplace(samples[i].hash());
+        }
+        return set.size();
     }
 
 private:
@@ -155,6 +166,12 @@ public:
           fp_window_(fp_window),
           max_minimizers_(max_minimizers_per_sample) {
     }
+
+    MinimizerSampling(MinimizerSampling&&) = default;
+    MinimizerSampling& operator=(MinimizerSampling&&) = default;
+
+    MinimizerSampling(MinimizerSampling const&) = delete;
+    MinimizerSampling& operator=(MinimizerSampling const&) = delete;
 
     template<iopp::STLInputStreamLike InputStream>
     std::vector<Sample> sample(InputStream& in, size_t const buffer_size = 64_Mi) {
