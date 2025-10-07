@@ -1,5 +1,5 @@
 add_library(zk-cscore INTERFACE)
-target_link_libraries(zk-cscore INTERFACE fp iopp pm-malloc)
+target_link_libraries(zk-cscore INTERFACE fp iopp unordered_dense pm-malloc)
 
 add_library(zk-psamplz INTERFACE)
 target_link_libraries(zk-psamplz INTERFACE ${TBB_LIBRARIES} fp growt iopp lz77 word-packing pm-malloc)
