@@ -171,6 +171,10 @@ public:
         return trie_.spell(index, buffer);
     }
 
+    size_t freq(TrieNodeIndex const index) const {
+        return trie_.node(index).freq();
+    }
+
     // try to find the string in the trie and report its depth and node
     TrieNodeDepth find(char const* s, size_t const max_len, TrieNodeIndex& out_node) const {
         auto v = trie_.root();

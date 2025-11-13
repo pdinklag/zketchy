@@ -33,3 +33,7 @@ set_target_properties(topk-lz77-tool PROPERTIES OUTPUT_NAME "topk-lz77")
 add_executable(topk-lz78-tool topk_lz78_tool.cpp)
 target_link_libraries(topk-lz78-tool zk-topk-lz78 cmdline)
 set_target_properties(topk-lz78-tool PROPERTIES OUTPUT_NAME "topk-lz78")
+
+add_executable(topk-substrings-tool topk_substrings_tool.cpp)
+target_link_libraries(topk-substrings-tool cmdline fp iopp lz77 pm-malloc)
+set_target_properties(topk-substrings-tool PROPERTIES OUTPUT_NAME "topk-substrings")
