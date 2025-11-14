@@ -192,6 +192,10 @@ public:
         out_node = v;
         return dv;
     }
+
+    size_t num_renormalizations() const {
+        return space_saving_.num_renormalizations();
+    }
 };
 
 }

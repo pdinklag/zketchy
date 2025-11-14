@@ -303,6 +303,10 @@ public:
     {
         return buckets_[f].size(items_);
     }
+
+    inline Index num_renormalizations() const {
+        return num_renormalize_;
+    }
 };
 
 }

@@ -321,7 +321,7 @@ private:
         StringFrequencyTable freqs(topk, k);
 
         phase.stop();
-        std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms" << std::endl;
+        std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms (renormalizations: " << topk.num_renormalizations() << ")" << std::endl;
 
         return freqs;
     }
