@@ -41,6 +41,7 @@ public:
     LinkedList& operator=(LinkedList const& other) = default;
 
     inline void push_front(T* items, Index const i) {
+        assert(head_ != i);
         auto& item = items[i];
 
         if(head_ != NIL) {
@@ -65,8 +66,14 @@ public:
         auto const iprev = item_to_delete.prev();
         auto const inext = item_to_delete.next();
 
-        if(iprev != NIL) items[iprev].next(inext);
-        if(inext != NIL) items[inext].prev(iprev);
+        if(iprev != NIL) {
+            assert(iprev != inext);
+            items[iprev].next(inext);
+        }
+        if(inext != NIL) {
+            assert(iprev != inext);
+            items[inext].prev(iprev);
+        }
 
         if(head_ == i) {
             head_ = inext;
