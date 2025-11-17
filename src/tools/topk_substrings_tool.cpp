@@ -1,3 +1,4 @@
+#include <fstream>
 #include <libsais.h>
 #include <memory>
 #include <stack>
@@ -254,6 +255,8 @@ private:
     size_t prefix = SIZE_MAX;
     bool exact = false;
 
+    std::string outfilename;
+
     size_t k = SIZE_MAX;
     size_t max_freq = 1024 * 1024;
 
@@ -333,6 +336,7 @@ public:
         option('k', "count", k, "The number of substrings to extract");
         option("fmax", max_freq, "The maximum allowed frequency for the approximation.");
         option('e', "exact", exact, "Compute the exact top-k substrings using the suffix tree (memory heavy!).");
+        option('o', "out", outfilename, "The output file; stdout if empty");
     }
 
     virtual int main() override {
@@ -345,7 +349,13 @@ public:
         std::cerr << "n=" << t.length() << std::endl;
         
         auto freqs = exact ? compute_exact(t) : compute_approx(t);
-        freqs.serialize(std::cout);
+        if(outfilename.empty()) {
+            freqs.serialize(std::cout);
+        } else {
+            std::ofstream f(outfilename);
+            freqs.serialize(f);
+            f.close();
+        }
 
         return 0;
     }
