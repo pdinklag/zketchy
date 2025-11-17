@@ -29,19 +29,15 @@ concept SpaceSavingItem =
     };
 
 template <SpaceSavingItem T>
-class SpaceSaving
-{
+class SpaceSaving {
 private:
     using Index = typename T::Index;
     using List = LinkedList<T>;
 
-    struct RenormalizeFunc
-    {
+    struct RenormalizeFunc {
         Index base;
-        Index operator()(Index const f) const { return (f - base) / renorm_divisor_; }
+        Index operator()(Index const f) const { return (f > base) ? (f - base) : 0; }
     };
-
-    static constexpr size_t renorm_divisor_ = 2;
 
 public:
     static constexpr Index NIL = -1;
@@ -59,13 +55,11 @@ private:
 
     Index num_renormalize_;
 
-    void renormalize()
-    {
+    void renormalize() {
         // we normalize the frequency to [0, renorm_divisor_ * max_allowed_frequency_]
         RenormalizeFunc renormalize{threshold_};
-
-        for (Index i = beg_; i <= end_; i++)
-        {
+        
+        for (Index i = beg_; i <= end_; i++) {
             auto const f = std::max(items_[i].freq(), threshold_); // nb: we must NOT allow frequency below the threshold, that would cause negative frequencies
             items_[i].freq(renormalize(f));
         }
@@ -73,13 +67,12 @@ private:
         // compact buckets
         auto compacted_buckets = std::make_unique<List[]>(max_allowed_frequency_ + 1);
 
-        for (size_t f = 0; f <= max_allowed_frequency_; f++)
-        {
+        for (size_t f = 0; f <= max_allowed_frequency_; f++) {
             auto &bucket = buckets_[f];
-            if (!bucket.empty())
-            {
+            if (!bucket.empty()) {
                 auto const adjusted_f = renormalize(f);
                 compacted_buckets[adjusted_f].append(items_, bucket);
+                std::cout << f << " -> " << adjusted_f << std::endl;
             }
         }
         buckets_ = std::move(compacted_buckets);
@@ -92,13 +85,11 @@ private:
     }
 
 public:
-    SpaceSaving() : items_(nullptr), threshold_(0)
-    {
+    SpaceSaving() : items_(nullptr), threshold_(0) {
     }
 
     SpaceSaving(T *items, Index const begin, Index const end, Index const max_allowed_frequency)
-        : items_(items), beg_(begin), end_(end), threshold_(0), min_frequency_(NIL), max_allowed_frequency_(max_allowed_frequency), num_renormalize_(0)
-    {
+        : items_(items), beg_(begin), end_(end), threshold_(0), min_frequency_(NIL), max_allowed_frequency_(max_allowed_frequency), num_renormalize_(0) {
 
         assert(beg_ <= end_);
         assert(max_allowed_frequency_ > 1);
@@ -110,13 +101,11 @@ public:
     SpaceSaving(SpaceSaving &&) = default;
     SpaceSaving &operator=(SpaceSaving &&) = default;
 
-    SpaceSaving(SpaceSaving const &other)
-    {
+    SpaceSaving(SpaceSaving const &other) {
         *this = other;
     }
 
-    SpaceSaving &operator=(SpaceSaving const &other)
-    {
+    SpaceSaving &operator=(SpaceSaving const &other) {
         items_ = other.items_;
         beg_ = other.beg_;
         end_ = other.end_;
@@ -134,13 +123,11 @@ public:
         return *this;
     }
 
-    void set_items(T *items)
-    {
+    void set_items(T *items) {
         items_ = items;
     }
 
-    void init_garbage(bool reverse = false)
-    {
+    void init_garbage(bool reverse = false) {
         // link items in garbage bucket
         auto &garbage_bucket = buckets_[threshold_];
 
@@ -154,8 +141,7 @@ public:
         }
     }
 
-    bool get_garbage(Index &out_v) const
-    {
+    bool get_garbage(Index &out_v) const {
         auto &garbage_bucket = buckets_[threshold_];
         if (garbage_bucket.empty())
         {
@@ -168,8 +154,7 @@ public:
         }
     }
 
-    void increment(Index const v)
-    {
+    void increment(Index const v) {
         assert(v >= beg_);
         assert(v <= end_);
 
@@ -204,8 +189,7 @@ public:
         */
     }
 
-    void decrement(Index const v)
-    {
+    void decrement(Index const v) {
         assert(v >= beg_);
         assert(v <= end_);
 
@@ -233,8 +217,7 @@ public:
         items_[v].freq(f - 1);
     }
 
-    void decrement_all()
-    {
+    void decrement_all() {
         // if current threshold bucket exists, prepend all its nodes to the next bucket
         auto &min_bucket = buckets_[threshold_];
         if (!min_bucket.empty())
@@ -257,22 +240,21 @@ public:
         }
     }
 
-    void link(Index const v)
-    {
+    void link(Index const v) {
         assert(v >= beg_);
         assert(v <= end_);
 
-        auto const f = std::max(items_[v].freq(), threshold_); // make sure frequency is at least threshold
-        if (f >= max_allowed_frequency_)
+        auto f = std::max(items_[v].freq(), threshold_); // make sure frequency is at least threshold
+        if (f > max_allowed_frequency_)
         {
             // we are trying to directly insert something with a too large frequency
             // renormalize until the frequency matches and then call link again
             auto const &item = items_[v];
-            while (item.freq() >= max_allowed_frequency_)
+            while(item.freq() > max_allowed_frequency_)
             {
                 renormalize();
             }
-            return;
+            f = items_[v].freq(); // update!
         }
         assert(f <= max_allowed_frequency_);
 
@@ -281,8 +263,7 @@ public:
         bucket.push_front(items_, v);
     }
 
-    void unlink(Index const v)
-    {
+    void unlink(Index const v) {
         assert(v >= beg_);
         assert(v <= end_);
 
@@ -294,13 +275,11 @@ public:
         bucket.erase(items_, v);
     }
 
-    inline Index threshold() const
-    {
+    inline Index threshold() const {
         return threshold_;
     }
 
-    inline Index bucket_size(Index const f) const
-    {
+    inline Index bucket_size(Index const f) const {
         return buckets_[f].size(items_);
     }
 
