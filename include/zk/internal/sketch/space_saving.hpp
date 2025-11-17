@@ -72,7 +72,6 @@ private:
             if (!bucket.empty()) {
                 auto const adjusted_f = renormalize(f);
                 compacted_buckets[adjusted_f].append(items_, bucket);
-                std::cout << f << " -> " << adjusted_f << std::endl;
             }
         }
         buckets_ = std::move(compacted_buckets);
