@@ -20,6 +20,11 @@ private:
     double topk_lz77_window_ratio = 0.75;
     bool decompress = false;
 
+    bool flag_topk_sampled = false;
+    bool flag_topk_lz77 = false;
+    bool flag_psamplz_topk_sampled = false;
+    bool flag_psamplz_topk_lz77 = false;
+
 public:
     ZK() : cmdline::Program("zketchy compression utility", "Compresses the input") {
         required_arg("file", filename, "The input file.");
@@ -27,7 +32,11 @@ public:
         option('m', "memory", memory, "The memory limit.");
         option('c', "cscore-window-ratio", cscore_window_ratio, "The ratio of memory to use for the window in cscore.");
         option('y', "psamplz-window-ratio", psamplz_window_ratio, "The ratio of memory to use for the window in psamplz.");
-        option('x', "topk-lz77-window-ratio", topk_lz77_window_ratio, "The ratio of memory to use for the window in top-k-lz77.");
+        option('x', "topk-lz77-window-ratio", topk_lz77_window_ratio, "The ratio of memory to use for the window in topk-lz77.");
+        option('1', "topk-sampled", flag_topk_sampled, "Straight up go to topk-lz77 with sampled LZ77.");
+        option('2', "topk-lz77", flag_topk_lz77, "Straight up go to topk-lz77 with exact LZ77.");
+        option('3', "psamplz-topk-sampled", flag_psamplz_topk_sampled, "psamplz + topk-lz77 with sampled LZ77.");
+        option('4', "psamplz-topk-lz77", flag_psamplz_topk_lz77, "psamplz + topk-lz77 with exact LZ77.");
     }
 
     virtual int main() override {
@@ -47,44 +56,61 @@ public:
             auto strong_lz77 = false;
             size_t len_exp_min, len_exp_max;
 
-            // probe compressibility score
-            double score;
-
-            {
-                static constexpr size_t cscore_bytes_per_w = 1;
-                static constexpr size_t cscore_num_minimizers = 8;
-                static constexpr size_t cscore_len = 8;
-                static constexpr size_t cscore_bytes_per_sample = 150;
-                static constexpr size_t cscore_window_max = 64_Mi;
-                static constexpr size_t cscore_sampling_min = 16_Ki;
-
-                double const mem_window = cscore_window_ratio * double(memory);
-                size_t const w = std::min(cscore_window_max, size_t(cscore_bytes_per_w * mem_window));
-                size_t const mem_samples = memory - w * cscore_bytes_per_w;
-                double const max_samples = double(mem_samples) / double(cscore_bytes_per_sample);
-                size_t const cscore_sampling = std::max(cscore_sampling_min, size_t(double(n) / max_samples));
-
-                std::cout << "cscore (s=" << cscore_sampling << ", w=" << w << ") ... "; std::cout.flush();
-
-                zk::internal::MemoryTimePhase phase;
-                phase.start();
-                score = zk::CScore(cscore_sampling, cscore_len, cscore_num_minimizers, w).compute(in);
-                phase.stop();
-
-                std::cout << "time=" << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", mem=" << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ", score=" << score << std::endl;
-            }
-
-            if(score < 0.25) {
-                precompress = true;
-                if(score < 0.025) {
-                    len_exp_min = 10;
-                    len_exp_max = 12;
-                } else {
-                    len_exp_min = 12;
-                    len_exp_max = 12;
-                }
-            } else if(score > 0.75) {
+            if(flag_topk_sampled) {
+                precompress = false;
+                strong_lz77 = false;
+            } else if(flag_topk_lz77) {
+                precompress = false;
                 strong_lz77 = true;
+            } else if(flag_psamplz_topk_sampled) {
+                precompress = true;
+                strong_lz77 = false;
+                len_exp_min = 10;
+                len_exp_max = 14;
+            } else if(flag_psamplz_topk_lz77) {
+                precompress = true;
+                strong_lz77 = true;
+                len_exp_min = 10;
+                len_exp_max = 14;
+            } else {
+                // determine configuration based on a compressibility score
+                double score;
+                {
+                    static constexpr size_t cscore_bytes_per_w = 1;
+                    static constexpr size_t cscore_num_minimizers = 8;
+                    static constexpr size_t cscore_len = 8;
+                    static constexpr size_t cscore_bytes_per_sample = 150;
+                    static constexpr size_t cscore_window_max = 64_Mi;
+                    static constexpr size_t cscore_sampling_min = 16_Ki;
+
+                    double const mem_window = cscore_window_ratio * double(memory);
+                    size_t const w = std::min(cscore_window_max, size_t(cscore_bytes_per_w * mem_window));
+                    size_t const mem_samples = memory - w * cscore_bytes_per_w;
+                    double const max_samples = double(mem_samples) / double(cscore_bytes_per_sample);
+                    size_t const cscore_sampling = std::max(cscore_sampling_min, size_t(double(n) / max_samples));
+
+                    std::cout << "cscore (s=" << cscore_sampling << ", w=" << w << ") ... "; std::cout.flush();
+
+                    zk::internal::MemoryTimePhase phase;
+                    phase.start();
+                    score = zk::CScore(cscore_sampling, cscore_len, cscore_num_minimizers, w).compute(in);
+                    phase.stop();
+
+                    std::cout << "time=" << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", mem=" << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ", score=" << score << std::endl;
+                }
+
+                if(score < 0.25) {
+                    precompress = true;
+                    if(score < 0.025) {
+                        len_exp_min = 10;
+                        len_exp_max = 12;
+                    } else {
+                        len_exp_min = 12;
+                        len_exp_max = 12;
+                    }
+                } else if(score > 0.75) {
+                    strong_lz77 = true;
+                }
             }
 
             // psamplz
@@ -122,13 +148,13 @@ public:
                 static constexpr size_t topk_lz_sampling_weak = 4;
                 static constexpr size_t topk_lz_sampling_strong = 0;
                 static constexpr size_t topk_bytes_per_k = 59;
-                static constexpr size_t topk_bytes_per_w_weak = 3;
-                static constexpr size_t topk_bytes_per_w_strong = 12;
+                static constexpr double topk_bytes_per_w_weak = 3.75;
+                static constexpr double topk_bytes_per_w_strong = 12;
                 static constexpr size_t topk_window_max = 2_Gi - 1; // nb: never go beyond 31-bit
 
                 double const mem_window = topk_lz77_window_ratio * double(memory);
                 size_t const sampling = strong_lz77 ? topk_lz_sampling_strong : topk_lz_sampling_weak;
-                size_t const topk_bytes_per_w = strong_lz77 ? topk_bytes_per_w_strong : topk_bytes_per_w_weak;
+                double const topk_bytes_per_w = strong_lz77 ? topk_bytes_per_w_strong : topk_bytes_per_w_weak;
                 size_t const w = std::min(topk_window_max, size_t(mem_window / topk_bytes_per_w));
                 size_t const k = size_t(double(memory - w * topk_bytes_per_w) / double(topk_bytes_per_k));
 
