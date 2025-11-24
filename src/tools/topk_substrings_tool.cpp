@@ -145,6 +145,7 @@ public:
     }
 
     StringFrequencyTable(SuffixTree const& st, std::string_view const& text, size_t const k) {
+        // PASS 1 - ignoring implcit nodes
         // compute node frequencies and occurrences
         struct NodeFreq {
             uint32_t v;
@@ -186,18 +187,45 @@ public:
             [&](NodeFreq const& a, NodeFreq const& b){
                 return a.freq > b.freq;
             });
-        
-        // keep only the top k
+
+        // keep only the top k (so far)
         if(nodes_with_freq.size() > k) {
             nodes_with_freq.resize(k);
+        }
+        nodes_with_freq.shrink_to_fit();
+
+        // PASS 2 - account for implicit nodes
+        struct SubstringFreq {
+            uint32_t pos;
+            uint32_t len;
+            uint32_t freq;
+        } __attribute__((packed));
+
+        std::vector<SubstringFreq> substrings_with_freq;
+        substrings_with_freq.reserve(k);
+        {
+            for(auto const& x : nodes_with_freq) {
+                uint32_t const d = st.depth(x.v);
+                uint32_t const parent_d = st.depth(st.parent(x.v));
+
+                // 
+                for(uint32_t j = 1; j <= d - parent_d; j++) {
+                    substrings_with_freq.push_back(SubstringFreq{ x.occ, parent_d + j, x.freq });
+                }
+            }
+        }
+
+        // keep only the top k
+        if(substrings_with_freq.size() > k) {
+            substrings_with_freq.resize(k);
         }
 
         // translate
         fp::RabinKarp61 rk(257);
 
-        table_.reserve(nodes_with_freq.size());
-        for(auto x : nodes_with_freq) {
-            auto const s = text.substr(x.occ, st.depth(x.v));
+        table_.reserve(substrings_with_freq.size());
+        for(auto x : substrings_with_freq) {
+            auto const s = text.substr(x.pos, x.len);
 
             uint64_t fp = 0;
             for(auto const c : s) {
