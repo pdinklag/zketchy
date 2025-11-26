@@ -27,7 +27,7 @@ public:
     StringFrequencyTable() {
     }
 
-    StringFrequencyTable(zk::internal::SuffixTree const& st, std::string_view const& text, size_t const k) {
+    StringFrequencyTable(zk::internal::SuffixTree<> const& st, std::string_view const& text, size_t const k) {
         // PASS 1 - ignoring implcit nodes
         // compute node frequencies and occurrences
         struct NodeFreq {

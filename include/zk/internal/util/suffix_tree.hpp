@@ -1,23 +1,28 @@
 #include <cstdint>
+#include <concepts>
 #include <functional>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace zk::internal {
 
 // a naive (!) suffix tree implementation for conceptual uses, not succinctness or performance
+template<std::unsigned_integral Index = uint32_t>
 class SuffixTree {
 public:
     struct Node {
-        uint32_t depth;
-        uint32_t parent;
-        std::vector<uint32_t> children;
+        Index depth;
+        Index parent;
+        std::vector<Index> children;
 
         Node() : depth(0), parent(0) {
         }
     };
 
 private:
+    using SignedIndex = std::make_signed_t<Index>;
+
     size_t num_leaves_;
     std::unique_ptr<Node[]> nodes_;
     size_t num_internal_;
@@ -30,8 +35,8 @@ private:
     }
 
 public:
-    SuffixTree(int32_t const* sa, int32_t* const lcp, size_t const n) : num_leaves_(n), num_internal_(0), nodes_(std::make_unique<Node[]>(2 * n)) {
-        size_t v = root();
+    SuffixTree(SignedIndex const* sa, SignedIndex* const lcp, size_t const n) : num_leaves_(n), num_internal_(0), nodes_(std::make_unique<Node[]>(2 * n)) {
+        auto v = root();
         for(size_t i = 0; i < n; i++) {
             auto const x = leaf(sa[i]);
             auto const d = lcp[i];
@@ -43,7 +48,7 @@ public:
 
             // std::cout << "\t-> navigate up to v=" << v << ", d(v)=" << depth(v) << std::endl;
 
-            int32_t y;
+            Index y;
             if(nodes_[v].depth == d) {
                 // simply insert a new leaf as a child of v
                 y = v;
@@ -71,22 +76,22 @@ public:
         }
     }
 
-    size_t root() const { return 0; }
-    int32_t depth(size_t const v) const { return nodes_[v].depth; }
-    int32_t parent(size_t const v) const { return nodes_[v].parent; }
-    bool is_leaf(size_t const v) const { return nodes_[v].children.empty(); }
-    std::vector<uint32_t> const& children(size_t const v) const { return nodes_[v].children; }
+    Index root() const { return 0; }
+    int32_t depth(Index const v) const { return nodes_[v].depth; }
+    int32_t parent(Index const v) const { return nodes_[v].parent; }
+    bool is_leaf(Index const v) const { return nodes_[v].children.empty(); }
+    std::vector<Index> const& children(Index const v) const { return nodes_[v].children; }
 
     using VisitFunc = std::function<void(size_t const)>;
 
-    void dfs(size_t const v, VisitFunc visit) const {
+    void dfs(Index const v, VisitFunc visit) const {
         for(auto const x : nodes_[v].children) {
             dfs(x, visit);
         }
         visit(v);
     }
 
-    size_t freq(size_t const v) const {
+    size_t freq(Index const v) const {
         if(is_leaf(v)) {
             return 1;
         } else {
@@ -98,7 +103,7 @@ public:
         }
     }
 
-    size_t occ(size_t const v) const {
+    size_t occ(Index const v) const {
         if(is_leaf(v)) {
             return v - 1;
         } else {
