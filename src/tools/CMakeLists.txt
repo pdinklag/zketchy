@@ -10,6 +10,10 @@ add_executable(lz78-tool lz78_tool.cpp)
 target_link_libraries(lz78-tool cmdline code iopp pm-malloc)
 set_target_properties(lz78-tool PROPERTIES OUTPUT_NAME "lz78")
 
+add_executable(lz78-lru-tool lz78_lru_tool.cpp)
+target_link_libraries(lz78-lru-tool cmdline code iopp pm-malloc)
+set_target_properties(lz78-lru-tool PROPERTIES OUTPUT_NAME "lz78-lru")
+
 add_executable(psamplz-tool psamplz_tool.cpp)
 target_link_libraries(psamplz-tool zk-psamplz cmdline)
 set_target_properties(psamplz-tool PROPERTIES OUTPUT_NAME "psamplz")
