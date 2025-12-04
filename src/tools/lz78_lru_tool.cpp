@@ -91,7 +91,7 @@ public:
             }
 
             zk::internal::Result result;
-            result.add("algo", "topk_lz78");
+            result.add("algo", "lz78_lru");
             result.add("file", std::filesystem::path(filename).filename().string());
             result.add("n", n);
             result.add("nout", std::filesystem::file_size(output_filename));
