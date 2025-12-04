@@ -50,6 +50,9 @@ public:
                 output_filename = filename + ".lz78lru";
             }
 
+            zk::internal::MemoryTimePhase stats("lz78-lru");
+            stats.start();
+
             size_t z = 0;
             {
                 iopp::FileInputStream in(filename, 0, n);
@@ -89,6 +92,7 @@ public:
 
                 enc.flush();
             }
+            stats.stop();
 
             zk::internal::Result result;
             result.add("algo", "lz78_lru");
@@ -97,6 +101,8 @@ public:
             result.add("k", k);
             result.add("nout", std::filesystem::file_size(output_filename));
             result.add("z", z);
+            result.add("t", stats.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
+            result.add("mem_peak", stats.get_metric<pm::MallocCounter::MemoryPeakMetric>());
             result.sort();
             result.print();
         }
