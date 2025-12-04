@@ -55,6 +55,8 @@ public:
             result.add("algo", "topk_lz78");
             result.add("file", std::filesystem::path(filename).filename().string());
             result.add("n", n);
+            result.add("k", k);
+            result.add("fmax", max_freq);
             result.add("nout", std::filesystem::file_size(output_filename));
             result.sort();
             result.print();

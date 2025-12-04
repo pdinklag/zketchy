@@ -94,6 +94,7 @@ public:
             result.add("algo", "lz78_lru");
             result.add("file", std::filesystem::path(filename).filename().string());
             result.add("n", n);
+            result.add("k", k);
             result.add("nout", std::filesystem::file_size(output_filename));
             result.add("z", z);
             result.sort();
