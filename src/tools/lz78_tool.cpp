@@ -143,10 +143,15 @@ public:
             auto sink = iopp::bitwise_output_to(fout);
 
             size_t z = 0;
+            size_t longest = 0;
+
             auto current = trie.root();
+            size_t current_len = 0;
             for(auto it = fin.begin(); it != fin.end(); it++) {
                 auto const c = *it;
                 if(fin.good()) {
+                    ++current_len;
+
                     Node v;
                     if(trie.follow_edge(current, c, v)) {
                         current = v;
@@ -157,16 +162,20 @@ public:
 
                         ++z;
                         current = trie.root();
+
+                        longest = std::max(longest, current_len);
+                        current_len = 0;
                     }
                 }
             }
 
             if(current != trie.root()) {
+                longest = std::max(longest, current_len);
                 code::Binary::encode(sink, current, std::bit_width(z));
                 ++z;
             }
 
-            std::cout << "z=" << z << std::endl;
+            std::cout << "z=" << z << ", longest=" << longest << std::endl;
         }
         return 0;
     }
