@@ -161,8 +161,11 @@ public:
                 }
             }
 
-            code::Binary::encode(sink, current, std::bit_width(z));
-            ++z;
+            if(current != trie.root()) {
+                code::Binary::encode(sink, current, std::bit_width(z));
+                ++z;
+            }
+
             std::cout << "z=" << z << std::endl;
         }
         return 0;
