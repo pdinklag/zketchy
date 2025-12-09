@@ -80,7 +80,7 @@ public:
         setup_encoding(enc, k_);
 
         // initialize top-k
-        Topk topk(k_ - 1, max_freq_);
+        Topk topk(k_ + 1, max_freq_);
 
         // factorize
         using It = iopp::StreamInputIterator<InputStream>;
@@ -138,7 +138,7 @@ public:
 
         // initialize decompression
         // - frequent substring 0 is reserved to indicate a literal character
-        Topk topk(k - 1, max_freq);
+        Topk topk(k + 1, max_freq);
 
         size_t n = 0;
         size_t z = 0;
