@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <bit>
 #include <memory>
+#include <random>
 #include <vector>
 
 #include <ankerl/unordered_dense.h>
@@ -174,8 +175,13 @@ public:
     MinimizerSampling& operator=(MinimizerSampling const&) = delete;
 
     template<iopp::STLInputStreamLike InputStream>
-    std::vector<Sample> sample(InputStream& in, size_t const buffer_size = 64_Mi) {
+    std::vector<Sample> sample(InputStream& in, size_t const buffer_size = 64_Mi, double skip_probability = 0.0) {
         std::vector<Sample> samples;
+
+        // initialize randomness
+        std::mt19937 r(19937);
+        std::uniform_real_distribution<double> dist(0, 1);
+        bool last_block_was_skipped = false;
 
         // initialize I/O
         zk::internal::OverlappingBlocks block(in, buffer_size, fp_window_);
@@ -202,24 +208,37 @@ public:
         do {
             if(block.empty()) continue;
 
-            while(p < block.end()) {
-                // read next character
-                fp = rk.roll(fp, *(p - fp_window_), *p);
-
-                if(((fp & sample_mask_) == 0 && i >= next_allowed) || i >= next_mandatory) {
-                    // finalize previous sample
-                    size_t const new_beg = i - fp_window_ + 1;
-                    samples.back().len = new_beg - samples.back().index;
-                    samples.emplace_back(new_beg, max_minimizers_);
-
-                    next_allowed = new_beg + min_sample_len_;
-                    next_mandatory = new_beg + max_sample_len_;
+            if(skip_probability > 0 && dist(r) < skip_probability) {
+                last_block_was_skipped = true;
+            } else {
+                if(last_block_was_skipped) {
+                    // re-initialize fingerprint
+                    fp = 0;
+                    for(size_t x = 0; x < fp_window_; x++) {
+                        fp = rk.push(fp, *(p - fp_window_ + x));
+                    }
+                    last_block_was_skipped = false;
                 }
-                samples.back().insert(fp);
 
-                // advance character
-                ++i;
-                ++p;
+                while(p < block.end()) {
+                    // read next character
+                    fp = rk.roll(fp, *(p - fp_window_), *p);
+
+                    if(((fp & sample_mask_) == 0 && i >= next_allowed) || i >= next_mandatory) {
+                        // finalize previous sample
+                        size_t const new_beg = i - fp_window_ + 1;
+                        samples.back().len = new_beg - samples.back().index;
+                        samples.emplace_back(new_beg, max_minimizers_);
+
+                        next_allowed = new_beg + min_sample_len_;
+                        next_mandatory = new_beg + max_sample_len_;
+                    }
+                    samples.back().insert(fp);
+
+                    // advance character
+                    ++i;
+                    ++p;
+                }
             }
 
             // advance block

@@ -7,6 +7,7 @@ class CScoreTool : public cmdline::Program {
 private:
     std::string filename;
     uint64_t sampling = 16_Ki;
+    double skip = 0.0;
     uint64_t len = 8;
     size_t max_minimizers = 8;
     size_t buffer_size = 32_Mi;
@@ -16,6 +17,7 @@ public:
     CScoreTool() : cmdline::Program("Compressibility score", "Quickly estimate how compressible the input is") {
         required_arg("file", filename, "The input file.");
         option('s', "sample", sampling, "The sampling rate.");
+        option("skip", skip, "The skip probabilty.");
         option('l', "len", len, "The pattern length.");
         option('m', "max_minimizers", max_minimizers, "The maximum number of minimizers per sample.");
         option('w', "buffer_size", buffer_size, "The buffer size.");
@@ -27,7 +29,7 @@ public:
 
         iopp::FileInputStream fis(filename, 0, n);
 
-        zk::CScore cscore(sampling, len, max_minimizers, buffer_size);
+        zk::CScore cscore(sampling, len, max_minimizers, buffer_size, skip);
         double const score = cscore.compute(fis);
 
         auto result = cscore.consume_last_result();

@@ -82,18 +82,20 @@ public:
                     static constexpr size_t cscore_bytes_per_sample = 150;
                     static constexpr size_t cscore_window_max = 64_Mi;
                     static constexpr size_t cscore_sampling_min = 16_Ki;
+                    static constexpr size_t cscore_ref_size = 16_Ki;
 
                     double const mem_window = cscore_window_ratio * double(memory);
                     size_t const w = std::min(cscore_window_max, size_t(cscore_bytes_per_w * mem_window));
                     size_t const mem_samples = memory - w * cscore_bytes_per_w;
                     double const max_samples = double(mem_samples) / double(cscore_bytes_per_sample);
                     size_t const cscore_sampling = std::max(cscore_sampling_min, size_t(double(n) / max_samples));
+                    double const cscore_skip = std::min(0.85, 1.0 - std::min(1.0, double(cscore_ref_size) / std::sqrt(double(n))));
 
-                    std::cout << "cscore (s=" << cscore_sampling << ", w=" << w << ") ... "; std::cout.flush();
+                    std::cout << "cscore (s=" << cscore_sampling << ", w=" << w << ", skip=" << cscore_skip << ") ... "; std::cout.flush();
 
                     zk::internal::MemoryTimePhase phase;
                     phase.start();
-                    score = zk::CScore(cscore_sampling, cscore_len, cscore_num_minimizers, w).compute(in);
+                    score = zk::CScore(cscore_sampling, cscore_len, cscore_num_minimizers, w, cscore_skip).compute(in);
                     phase.stop();
 
                     std::cout << "time=" << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", mem=" << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ", score=" << score << std::endl;

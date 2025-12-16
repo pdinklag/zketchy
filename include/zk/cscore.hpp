@@ -64,15 +64,17 @@ private:
     size_t len_;
     size_t max_minimizers_;
     size_t buffer_size_;
+    double skip_probability_;
 
     internal::Result result_;
 
 public:
-    CScore(size_t const sampling, size_t const len, size_t const max_minimizers, size_t const buffer_size = 64_Mi)
+    CScore(size_t const sampling, size_t const len, size_t const max_minimizers, size_t const buffer_size = 64_Mi, double skip_probability = 0.0)
         : sampling_(sampling),
           len_(len),
           max_minimizers_(max_minimizers),
-          buffer_size_(buffer_size) {
+          buffer_size_(buffer_size),
+          skip_probability_(skip_probability) {
     }
 
     CScore(CScore&&) = default;
@@ -86,7 +88,7 @@ public:
         
         phase.start();
         MinimizerSampling s(sampling_, len_, max_minimizers_);
-        auto samples = s.sample(in, buffer_size_);
+        auto samples = s.sample(in, buffer_size_, skip_probability_);
         auto clusters = zk::MinimizerSampling::compute_clusters(samples);
         phase.stop();
 
