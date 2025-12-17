@@ -286,180 +286,178 @@ private:
 
         // factorize
         auto get_meta = [&](MIndex const i){ return meta[meta_sorted[i]]; };
+    
+        struct Ref {
+            Index beg, src, len;
+            Index end() const { return beg + len - 1; }
+        } __attribute__((packed));
+
+        std::unique_ptr<std::vector<Ref>> lrefs[num_threads];
+        for(size_t x = 0; x < num_threads; x++) {
+            lrefs[x] = std::make_unique<std::vector<Ref>>();
+        }
 
         if constexpr(debug_) {
-            std::cout << "factorizing ... ";
+            std::cout << "factorize ... ";
             std::cout.flush();
             phase.start();
         }
 
-        internal::TimePhase phase_gather, phase_emit;
-        {
-            struct Ref {
-                Index beg, src, len;
-                Index end() const { return beg + len - 1; }
-            } __attribute__((packed));
-            auto const num_threads = omp_get_max_threads();
-            std::unique_ptr<std::vector<Ref>> lrefs[num_threads];
-            for(size_t x = 0; x < num_threads; x++) {
-                lrefs[x] = std::make_unique<std::vector<Ref>>();
-            }
+        #pragma omp parallel for
+        for(size_t j = 0; j < m; j++) {
+            auto const thread_num = omp_get_thread_num();
 
-            phase_gather.start();
+            // get SA position for parse suffix j
+            size_t const cur_pos = isa[j];
 
-            #pragma omp parallel for
-            for(size_t j = 0; j < m; j++) {
-                auto const thread_num = omp_get_thread_num();
+            // longest common extension
+            auto lce = [&](size_t const meta_dst, size_t const meta_src, size_t& matched_meta, size_t& rext, size_t& lext){
+                size_t l = 0;
 
-                // get SA position for parse suffix j
-                size_t const cur_pos = isa[j];
+                // first compare meta characters
+                matched_meta = 0;
+                while(meta_dst + matched_meta < m && meta_src + matched_meta < m && parse[meta_dst + matched_meta] == parse[meta_src + matched_meta]) {
+                    l += get_meta(parse[meta_dst + matched_meta]).len;
+                    ++matched_meta;
+                }
 
-                // longest common extension
-                auto lce = [&](size_t const meta_dst, size_t const meta_src, size_t& matched_meta, size_t& rext, size_t& lext){
-                    size_t l = 0;
+                // once we have a mismatch, extend ...
+                rext = 0;
+                lext = 0;
 
-                    // first compare meta characters
-                    matched_meta = 0;
-                    while(meta_dst + matched_meta < m && meta_src + matched_meta < m && parse[meta_dst + matched_meta] == parse[meta_src + matched_meta]) {
-                        l += get_meta(parse[meta_dst + matched_meta]).len;
-                        ++matched_meta;
-                    }
-
-                    // once we have a mismatch, extend ...
-                    rext = 0;
-                    lext = 0;
-
-                    if(matched_meta >= 1) {
-                        // ... to the right
-                        {
-                            size_t const x = parse_beg[meta_dst] + l;
-                            size_t const y = parse_beg[meta_src] + l;
-                            while(x + rext < n && y + rext < n && t[x + rext] == t[y + rext]) {
-                                ++rext;
-                            }
-                        }
-                        // ... and to the left
-                        {
-                            size_t x = parse_beg[meta_dst];
-                            size_t y = parse_beg[meta_src];
-                            while(y > 0 && t[x-1] == t[y-1]) {
-                                --x;
-                                --y;
-                                ++lext;
-                            }
+                if(matched_meta >= 1) {
+                    // ... to the right
+                    {
+                        size_t const x = parse_beg[meta_dst] + l;
+                        size_t const y = parse_beg[meta_src] + l;
+                        while(x + rext < n && y + rext < n && t[x + rext] == t[y + rext]) {
+                            ++rext;
                         }
                     }
-                    return l + rext + lext;
-                };
-
-                // compute PSV and NSV as well as longest common prefixes
-                ssize_t psv_pos = (ssize_t)cur_pos - 1;
-                while (psv_pos >= 0 && sa[psv_pos] > j) --psv_pos;
-
-                size_t psv_matched_meta, psv_rext, psv_lext;
-                size_t const psv_lcp = psv_pos >= 0 ? lce(j, (size_t)sa[psv_pos], psv_matched_meta, psv_rext, psv_lext) : 0;
-
-                size_t nsv_pos = cur_pos + 1;
-                while(nsv_pos < m && sa[nsv_pos] > j) ++nsv_pos;
-
-                size_t nsv_matched_meta, nsv_rext, nsv_lext;
-                size_t const nsv_lcp = nsv_pos < m ? lce(j, (size_t)sa[nsv_pos], nsv_matched_meta, nsv_rext, nsv_lext) : 0;
-
-                if(psv_matched_meta >= 1 || nsv_matched_meta >= 1) {
-                    // select maximum
-                    size_t dst, src, lcp, matched_meta, rext;
-                    if(psv_lcp > nsv_lcp) {
-                        lcp = psv_lcp;
-                        dst = parse_beg[j] - psv_lext;
-                        src = dst - (parse_beg[sa[psv_pos]] - psv_lext);
-                        matched_meta = psv_matched_meta;
-                        rext = psv_rext;
-                    } else {
-                        lcp = nsv_lcp;
-                        dst = parse_beg[j] - nsv_lext;
-                        src = dst - (parse_beg[sa[nsv_pos]] - nsv_lext);
-                        matched_meta = nsv_matched_meta;
-                        rext = nsv_rext;
+                    // ... and to the left
+                    {
+                        size_t x = parse_beg[meta_dst];
+                        size_t y = parse_beg[meta_src];
+                        while(y > 0 && t[x-1] == t[y-1]) {
+                            --x;
+                            --y;
+                            ++lext;
+                        }
                     }
+                }
+                return l + rext + lext;
+            };
 
-                    if(lcp > 1)[[likely]] { // nb: may occur as a rare bordercase
-                        // emit reference
-                        lrefs[thread_num]->emplace_back(dst, src, lcp);
+            // compute PSV and NSV as well as longest common prefixes
+            ssize_t psv_pos = (ssize_t)cur_pos - 1;
+            while (psv_pos >= 0 && sa[psv_pos] > j) --psv_pos;
 
-                        j += matched_meta - 1;
-                        if(rext > 0) {
-                            // we have encoded characters from the following meta characters
+            size_t psv_matched_meta, psv_rext, psv_lext;
+            size_t const psv_lcp = psv_pos >= 0 ? lce(j, (size_t)sa[psv_pos], psv_matched_meta, psv_rext, psv_lext) : 0;
+
+            size_t nsv_pos = cur_pos + 1;
+            while(nsv_pos < m && sa[nsv_pos] > j) ++nsv_pos;
+
+            size_t nsv_matched_meta, nsv_rext, nsv_lext;
+            size_t const nsv_lcp = nsv_pos < m ? lce(j, (size_t)sa[nsv_pos], nsv_matched_meta, nsv_rext, nsv_lext) : 0;
+
+            if(psv_matched_meta >= 1 || nsv_matched_meta >= 1) {
+                // select maximum
+                size_t dst, src, lcp, matched_meta, rext;
+                if(psv_lcp > nsv_lcp) {
+                    lcp = psv_lcp;
+                    dst = parse_beg[j] - psv_lext;
+                    src = dst - (parse_beg[sa[psv_pos]] - psv_lext);
+                    matched_meta = psv_matched_meta;
+                    rext = psv_rext;
+                } else {
+                    lcp = nsv_lcp;
+                    dst = parse_beg[j] - nsv_lext;
+                    src = dst - (parse_beg[sa[nsv_pos]] - nsv_lext);
+                    matched_meta = nsv_matched_meta;
+                    rext = nsv_rext;
+                }
+
+                if(lcp > 1)[[likely]] { // nb: may occur as a rare bordercase
+                    // emit reference
+                    lrefs[thread_num]->emplace_back(dst, src, lcp);
+
+                    j += matched_meta - 1;
+                    if(rext > 0) {
+                        // we have encoded characters from the following meta characters
+                        ++j;
+                        while(j < m && rext >= get_meta(parse[j]).len) {
+                            // TODO: we may have skipped additional metacharacters... but HOW???
+                            rext -= get_meta(parse[j]).len;
                             ++j;
-                            while(j < m && rext >= get_meta(parse[j]).len) {
-                                // TODO: we may have skipped additional metacharacters... but HOW???
-                                rext -= get_meta(parse[j]).len;
-                                ++j;
-                            }
                         }
                     }
                 }
             }
+        }
 
-            for(size_t x = 0; x < num_threads; x++) {
-                lrefs[x]->shrink_to_fit();
-            }
-            phase_gather.stop();
-
-            // emit
-            phase_emit.start();
-            {
-                size_t cur_gap = 0;
-
-                size_t i = 0;
-
-
-                size_t x = 0;
-                size_t j = 0;
-                auto has_next_ref = [&](){ return x < num_threads && j < lrefs[x]->size(); };
-                auto next_ref = [&](){ return (*lrefs[x])[j]; };
-                auto advance_ref = [&](){
-                    ++j;
-                    if(x < num_threads && j >= lrefs[x]->size()) {
-                        ++x;
-                        j = 0;
-                    }
-                };
-                
-                while(i < n) {
-                    while(has_next_ref() && i > next_ref().end()) {
-                        advance_ref();
-                    }
-
-                    if(has_next_ref() && i >= next_ref().beg) {
-                        auto const& ref = next_ref();
-                        auto const d = i - ref.beg;
-                        emit_reference(lz77::Factor(ref.src, ref.len - d));
-                        i = ref.end() + 1;
-                        advance_ref();
-
-                        if(cur_gap > 0) ++gap_num;
-                        cur_gap = 0;
-                    } else {
-                        emit_literal(t[i++]);
-
-                        ++gap_total;
-                        ++cur_gap;
-                    }
-                }
-                if(cur_gap > 0) ++gap_num;
-            }
-            phase_emit.stop();
+        for(size_t x = 0; x < num_threads; x++) {
+            lrefs[x]->shrink_to_fit();
         }
 
         if constexpr(debug_) {
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
-            std::cout << "\tt_gather=" << (size_t)phase_gather.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>()
-                      << ", t_emit=" << (size_t)phase_emit.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>()
-                      << std::endl;
+        }
+
+        if constexpr(debug_) {
+            std::cout << "emit ... ";
+            std::cout.flush();
+            phase.start();
+        }
+
+        // emit
+        {
+            size_t cur_gap = 0;
+            size_t x = 0;
+            size_t i = 0;
+            size_t j = 0;
+            auto has_next_ref = [&](){ return x < num_threads && j < lrefs[x]->size(); };
+            auto next_ref = [&](){ return (*lrefs[x])[j]; };
+            auto advance_ref = [&](){
+                ++j;
+                if(x < num_threads && j >= lrefs[x]->size()) {
+                    ++x;
+                    j = 0;
+                }
+            };
+            
+            while(i < n) {
+                while(has_next_ref() && i > next_ref().end()) {
+                    advance_ref();
+                }
+
+                if(has_next_ref() && i >= next_ref().beg) {
+                    auto const& ref = next_ref();
+                    auto const d = i - ref.beg;
+                    emit_reference(lz77::Factor(ref.src, ref.len - d));
+                    i = ref.end() + 1;
+                    advance_ref();
+
+                    if(cur_gap > 0) ++gap_num;
+                    cur_gap = 0;
+                } else {
+                    emit_literal(t[i++]);
+
+                    ++gap_total;
+                    ++cur_gap;
+                }
+            }
+            if(cur_gap > 0) ++gap_num;
+        }
+        
+        if constexpr(debug_) {
+            phase.stop();
+            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
 
             double const avg_gap_len = double(gap_total) / double(gap_num);
-            std::cout << "\taverage gap length: " << avg_gap_len << " (of " << gap_num << " gaps with total length " << gap_total << ")" << std::endl;
+            std::cout << std::endl;
+            std::cout << "average gap length: " << avg_gap_len << " (of " << gap_num << " gaps with total length " << gap_total << ")" << std::endl;
         }
     }
 
