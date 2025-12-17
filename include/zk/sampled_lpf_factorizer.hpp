@@ -81,6 +81,7 @@ private:
             RK64 rk_meta(rolling_fp_base_);
 
             size_t const s = (1ULL << sampling_) - 1;
+            size_t const min_metachar_len = s / 2;
 
             #pragma omp parallel
             {
@@ -116,7 +117,7 @@ private:
                 }
 
                 for(; i < end; i++) {
-                    if((fp_trigger & s) == 0) {
+                    if(i - last >= min_metachar_len && (fp_trigger & s) == 0) {
                         local_pre_parse.push_back(Metachar{ last, MLength(i - last), fp_meta });
                         last = i;
                         fp_meta = 0;
@@ -347,33 +348,34 @@ private:
                 size_t nsv_matched_meta, nsv_ext;
                 size_t const nsv_lcp = nsv_pos < m ? lce(j, (size_t)sa[nsv_pos], nsv_matched_meta, nsv_ext) : 0;
 
-                // select maximum
-                size_t lcp, src, matched_meta, ext;
-                if(psv_lcp > nsv_lcp) {
-                    lcp = psv_lcp;
-                    src = parse_beg[j] - parse_beg[sa[psv_pos]];
-                    matched_meta = psv_matched_meta;
-                    ext = psv_ext;
-                } else {
-                    lcp = nsv_lcp;
-                    src = parse_beg[j] - parse_beg[sa[nsv_pos]];
-                    matched_meta = nsv_matched_meta;
-                    ext = nsv_ext;
-                }
+                if(psv_matched_meta >= 1 || nsv_matched_meta >= 1) {
+                    // select maximum
+                    size_t lcp, src, matched_meta, ext;
+                    if(psv_lcp > nsv_lcp) {
+                        lcp = psv_lcp;
+                        src = parse_beg[j] - parse_beg[sa[psv_pos]];
+                        matched_meta = psv_matched_meta;
+                        ext = psv_ext;
+                    } else {
+                        lcp = nsv_lcp;
+                        src = parse_beg[j] - parse_beg[sa[nsv_pos]];
+                        matched_meta = nsv_matched_meta;
+                        ext = nsv_ext;
+                    }
 
-                // emit reference
-                if(lcp >= 2) {
-                    lrefs[thread_num]->emplace_back(parse_beg[j], src, lcp);
-                    // emit_reference(lz77::Factor(src, lcp));
+                    if(lcp > 1)[[likely]] { // nb: may occur as a rare bordercase
+                        // emit reference
+                        lrefs[thread_num]->emplace_back(parse_beg[j], src, lcp);
 
-                    j += matched_meta - 1;
-                    if(ext > 0) {
-                        // we have encoded characters from the following meta characters
-                        ++j;
-                        while(j < m && ext >= get_meta(parse[j]).len) {
-                            // TODO: we may have skipped additional metacharacters... but HOW???
-                            ext -= get_meta(parse[j]).len;
+                        j += matched_meta - 1;
+                        if(ext > 0) {
+                            // we have encoded characters from the following meta characters
                             ++j;
+                            while(j < m && ext >= get_meta(parse[j]).len) {
+                                // TODO: we may have skipped additional metacharacters... but HOW???
+                                ext -= get_meta(parse[j]).len;
+                                ++j;
+                            }
                         }
                     }
                 }
