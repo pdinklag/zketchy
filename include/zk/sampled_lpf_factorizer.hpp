@@ -315,58 +315,71 @@ private:
                 size_t const cur_pos = isa[j];
 
                 // longest common extension
-                auto lce = [&](size_t const a, size_t const b, size_t& matched_meta, size_t& rext){
+                auto lce = [&](size_t const meta_dst, size_t const meta_src, size_t& matched_meta, size_t& rext, size_t& lext){
                     size_t l = 0;
 
                     // first compare meta characters
                     matched_meta = 0;
-                    while(a + matched_meta < m && b + matched_meta < m && parse[a + matched_meta] == parse[b + matched_meta]) {
-                        l += get_meta(parse[a + matched_meta]).len;
+                    while(meta_dst + matched_meta < m && meta_src + matched_meta < m && parse[meta_dst + matched_meta] == parse[meta_src + matched_meta]) {
+                        l += get_meta(parse[meta_dst + matched_meta]).len;
                         ++matched_meta;
                     }
 
                     // once we have a mismatch, extend ...
                     rext = 0;
+                    lext = 0;
 
                     if(matched_meta >= 1) {
                         // ... to the right
                         {
-                            size_t const x = parse_beg[a] + l;
-                            size_t const y = parse_beg[b] + l;
+                            size_t const x = parse_beg[meta_dst] + l;
+                            size_t const y = parse_beg[meta_src] + l;
                             while(x + rext < n && y + rext < n && t[x + rext] == t[y + rext]) {
                                 ++rext;
                             }
                         }
+                        // ... and to the left
+                        /*
+                        {
+                            size_t x = parse_beg[meta_dst];
+                            size_t y = parse_beg[meta_src];
+                            while(y > 0 && t[x-1] == t[y-1]) {
+                                --x;
+                                --y;
+                                ++lext;
+                            }
+                        }
+                        */
                     }
-                    return l + rext;
+                    return l + rext + lext;
                 };
 
                 // compute PSV and NSV as well as longest common prefixes
                 ssize_t psv_pos = (ssize_t)cur_pos - 1;
                 while (psv_pos >= 0 && sa[psv_pos] > j) --psv_pos;
 
-                size_t psv_matched_meta, psv_rext;
-                size_t const psv_lcp = psv_pos >= 0 ? lce(j, (size_t)sa[psv_pos], psv_matched_meta, psv_rext) : 0;
+                size_t psv_matched_meta, psv_rext, psv_lext;
+                size_t const psv_lcp = psv_pos >= 0 ? lce(j, (size_t)sa[psv_pos], psv_matched_meta, psv_rext, psv_lext) : 0;
 
                 size_t nsv_pos = cur_pos + 1;
                 while(nsv_pos < m && sa[nsv_pos] > j) ++nsv_pos;
 
-                size_t nsv_matched_meta, nsv_rext;
-                size_t const nsv_lcp = nsv_pos < m ? lce(j, (size_t)sa[nsv_pos], nsv_matched_meta, nsv_rext) : 0;
+                size_t nsv_matched_meta, nsv_rext, nsv_lext;
+                size_t const nsv_lcp = nsv_pos < m ? lce(j, (size_t)sa[nsv_pos], nsv_matched_meta, nsv_rext, nsv_lext) : 0;
 
                 if(psv_matched_meta >= 1 || nsv_matched_meta >= 1) {
                     // select maximum
                     size_t dst, src, lcp, matched_meta, rext;
                     if(psv_lcp > nsv_lcp) {
                         lcp = psv_lcp;
-                        dst = parse_beg[j];
-                        src = dst - parse_beg[sa[psv_pos]];
+                        dst = parse_beg[j] - psv_lext;
+                        src = dst - (parse_beg[sa[psv_pos]] - psv_lext);
                         matched_meta = psv_matched_meta;
                         rext = psv_rext;
                     } else {
                         lcp = nsv_lcp;
-                        dst = parse_beg[j];
-                        src = dst - parse_beg[sa[nsv_pos]];
+                        dst = parse_beg[j] - nsv_lext;
+                        src = dst - (parse_beg[sa[nsv_pos]] - nsv_lext);
                         matched_meta = nsv_matched_meta;
                         rext = nsv_rext;
                     }
