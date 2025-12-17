@@ -91,6 +91,8 @@ public:
                 iopp::FileInputStream fin(filename);
                 auto in = iopp::bitwise_input_from(fin);
 
+                zk::internal::BlockDecoder dec(in);
+
                 uint64_t const magic = in.read(32);
                 if(magic != MAGIC) {
                     std::cerr << "wrong magic: 0x" << std::hex << magic << " (expected: 0x" << MAGIC << ")" << std::endl;
@@ -98,7 +100,6 @@ public:
                 }
 
                 auto const n = in.read(64);
-                zk::internal::BlockDecoder dec(in);
                 setup_encoding(dec, n);
 
                 while(in) {
