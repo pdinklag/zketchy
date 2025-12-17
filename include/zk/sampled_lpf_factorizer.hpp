@@ -339,7 +339,6 @@ private:
                             }
                         }
                         // ... and to the left
-                        /*
                         {
                             size_t x = parse_beg[meta_dst];
                             size_t y = parse_beg[meta_src];
@@ -349,7 +348,6 @@ private:
                                 ++lext;
                             }
                         }
-                        */
                     }
                     return l + rext + lext;
                 };
