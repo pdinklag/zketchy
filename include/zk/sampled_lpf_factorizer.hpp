@@ -153,6 +153,7 @@ private:
         }
 
         std::vector<Metachar> meta;
+        size_t meta_len_total = 0;
         std::vector<MIndex> parse;
         {
             ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps;
@@ -167,6 +168,8 @@ private:
 
                         meta_fps.emplace(fp, meta.size());
                         meta.push_back(x);
+
+                        meta_len_total += x.len;
                     }
                 }
                 lpre_parse[thread_num].reset();
@@ -185,6 +188,7 @@ private:
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
             std::cout << "\tdistinct metacharacters: " << sigma << std::endl;
+            std::cout << "\taverage length: " << double(meta_len_total) / double(sigma) << " (total: " << meta_len_total << ")" << std::endl;
         }
 
         // sort meta characters
