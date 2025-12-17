@@ -128,7 +128,11 @@ public:
             size_t z = 0;
             
             {
+                std::cout << "load file " << filename << " (n=" << n << ") ... "; std::cout.flush();
+                t.start();
                 auto s = iopp::load_file_str(filename, n);
+                t.stop();
+                std::cout << "(" << (size_t)t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
                 
                 zk::SampledLPFFactorizer lz77(sampling, fp_window);
                 t.start();
