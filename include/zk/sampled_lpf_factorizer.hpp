@@ -315,7 +315,7 @@ private:
                 size_t const cur_pos = isa[j];
 
                 // longest common extension
-                auto lce = [&](size_t const a, size_t const b, size_t& matched_meta, size_t& ext){
+                auto lce = [&](size_t const a, size_t const b, size_t& matched_meta, size_t& rext){
                     size_t l = 0;
 
                     // first compare meta characters
@@ -325,55 +325,63 @@ private:
                         ++matched_meta;
                     }
 
-                    // once we have a mismatch, extend by comparing remaining characters
-                    size_t const x = parse_beg[a] + l;
-                    size_t const y = parse_beg[b] + l;
-                    ext = 0;
-                    while(x + ext < n && y + ext < n && t[x + ext] == t[y + ext]) {
-                        ++ext;
+                    // once we have a mismatch, extend ...
+                    rext = 0;
+
+                    if(matched_meta >= 1) {
+                        // ... to the right
+                        {
+                            size_t const x = parse_beg[a] + l;
+                            size_t const y = parse_beg[b] + l;
+                            while(x + rext < n && y + rext < n && t[x + rext] == t[y + rext]) {
+                                ++rext;
+                            }
+                        }
                     }
-                    return l + ext;
+                    return l + rext;
                 };
 
                 // compute PSV and NSV as well as longest common prefixes
                 ssize_t psv_pos = (ssize_t)cur_pos - 1;
                 while (psv_pos >= 0 && sa[psv_pos] > j) --psv_pos;
 
-                size_t psv_matched_meta, psv_ext;
-                size_t const psv_lcp = psv_pos >= 0 ? lce(j, (size_t)sa[psv_pos], psv_matched_meta, psv_ext) : 0;
+                size_t psv_matched_meta, psv_rext;
+                size_t const psv_lcp = psv_pos >= 0 ? lce(j, (size_t)sa[psv_pos], psv_matched_meta, psv_rext) : 0;
 
                 size_t nsv_pos = cur_pos + 1;
                 while(nsv_pos < m && sa[nsv_pos] > j) ++nsv_pos;
 
-                size_t nsv_matched_meta, nsv_ext;
-                size_t const nsv_lcp = nsv_pos < m ? lce(j, (size_t)sa[nsv_pos], nsv_matched_meta, nsv_ext) : 0;
+                size_t nsv_matched_meta, nsv_rext;
+                size_t const nsv_lcp = nsv_pos < m ? lce(j, (size_t)sa[nsv_pos], nsv_matched_meta, nsv_rext) : 0;
 
                 if(psv_matched_meta >= 1 || nsv_matched_meta >= 1) {
                     // select maximum
-                    size_t lcp, src, matched_meta, ext;
+                    size_t dst, src, lcp, matched_meta, rext;
                     if(psv_lcp > nsv_lcp) {
                         lcp = psv_lcp;
-                        src = parse_beg[j] - parse_beg[sa[psv_pos]];
+                        dst = parse_beg[j];
+                        src = dst - parse_beg[sa[psv_pos]];
                         matched_meta = psv_matched_meta;
-                        ext = psv_ext;
+                        rext = psv_rext;
                     } else {
                         lcp = nsv_lcp;
-                        src = parse_beg[j] - parse_beg[sa[nsv_pos]];
+                        dst = parse_beg[j];
+                        src = dst - parse_beg[sa[nsv_pos]];
                         matched_meta = nsv_matched_meta;
-                        ext = nsv_ext;
+                        rext = nsv_rext;
                     }
 
                     if(lcp > 1)[[likely]] { // nb: may occur as a rare bordercase
                         // emit reference
-                        lrefs[thread_num]->emplace_back(parse_beg[j], src, lcp);
+                        lrefs[thread_num]->emplace_back(dst, src, lcp);
 
                         j += matched_meta - 1;
-                        if(ext > 0) {
+                        if(rext > 0) {
                             // we have encoded characters from the following meta characters
                             ++j;
-                            while(j < m && ext >= get_meta(parse[j]).len) {
+                            while(j < m && rext >= get_meta(parse[j]).len) {
                                 // TODO: we may have skipped additional metacharacters... but HOW???
-                                ext -= get_meta(parse[j]).len;
+                                rext -= get_meta(parse[j]).len;
                                 ++j;
                             }
                         }
