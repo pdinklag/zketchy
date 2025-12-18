@@ -15,7 +15,7 @@
 #include "internal/io/overlapping_blocks.hpp"
 #include "internal/io/vbyte_coding.hpp"
 #include "internal/sketch/bloom_filter.hpp"
-#include "internal/util/concurrent_sampling.hpp"
+#include "internal/util/concurrent_map.hpp"
 #include "internal/util/idiv_ceil.hpp"
 #include "internal/util/si_iec_literals.hpp"
 
@@ -66,7 +66,13 @@ public:
 private:
     using RK = fp::RabinKarp61;
     using Fingerprint = RK::Fingerprint;
-    using ConcurrentSampling = internal::ConcurrentSampling<Fingerprint, size_t>;
+    using ConcurrentSampling = internal::ConcurrentMap<Fingerprint, size_t>;
+
+    struct UpdateLeftmost {
+        using mapped_type = size_t;
+
+        mapped_type operator()(mapped_type& lhs, const mapped_type& rhs) const { return lhs = std::min(lhs, rhs); }
+    };
 
     static constexpr Fingerprint rolling_fp_base_ = (1ULL << 16) - 39;
 
@@ -170,7 +176,7 @@ private:
                 internal::TimePhase phase_sample("sample");
                 phase_sample.start();
                 
-                ConcurrentSampling::Map growt_map(n / (1ULL << sampling_));
+                ConcurrentSampling growt_map(n / (1ULL << sampling_));
 
                 std::unique_ptr<BloomFilter> lbloom[num_threads];
                 for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
@@ -205,7 +211,7 @@ private:
 
                                 // sample
                                 if((fp & s) == 0) {
-                                    growt_handle.insert_or_update(fp, i, ConcurrentSampling::UpdateLeftmost(), i);
+                                    growt_handle.insert_or_update(fp, i, UpdateLeftmost(), i);
                                     bloom.emplace(fp);
                                 }
                             }
