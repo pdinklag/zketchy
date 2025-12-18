@@ -91,6 +91,7 @@ private:
 
                 lpre_parse[thread_num] = std::make_unique<std::vector<Metachar>>();
                 auto& local_pre_parse = *lpre_parse[thread_num];
+                local_pre_parse.reserve(size_t(1.2 * double(n) / double(s * num_threads))); // exaggerate a little bit to account for standard deviation
 
                 Fingerprint fp_trigger = 0;
                 Fingerprint64 fp_meta = 0;
@@ -130,19 +131,17 @@ private:
                 if(last < i) {
                     local_pre_parse.push_back(Metachar{ last, MLength(i - last), fp_meta });
                 }
-
-                local_pre_parse.shrink_to_fit();
             }
+        }
+
+        size_t pre_parse_size = 0;
+        for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
+            pre_parse_size += lpre_parse[thread_num]->size();
         }
 
         if constexpr(debug_) {
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
-
-            size_t pre_parse_size = 0;
-            for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
-                pre_parse_size += lpre_parse[thread_num]->size();
-            }
             std::cout << "\tparse size: " << pre_parse_size << std::endl;
         }
 
@@ -155,6 +154,7 @@ private:
         std::vector<Metachar> meta;
         size_t meta_len_total = 0;
         std::vector<MIndex> parse;
+        parse.reserve(pre_parse_size);
         {
             ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps;
             for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
@@ -177,9 +177,7 @@ private:
         }
 
         if(meta.size() >= 4_Gi) std::abort(); // if this happens, you wouldn't want to wait for the result anyway
-
         meta.shrink_to_fit();
-        parse.shrink_to_fit();
 
         auto const m = parse.size();
         auto const sigma = meta.size();
