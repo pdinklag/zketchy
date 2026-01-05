@@ -106,7 +106,7 @@ private:
         internal::MemoryTimePhase overall, phase;
 
         size_t const window_size = std::min(window_size_, n);
-        size_t const bloom_filter_size = bloom_filter_scale_ * (n / (1ULL << sampling_));
+        size_t const bloom_filter_size = bloom_filter_scale_ * (n / (1ULL << len_exp_min_));
         size_t const num_threads = omp_get_max_threads();
 
         size_t const len_max = 1ULL << len_exp_max_;
@@ -142,6 +142,11 @@ private:
                 auto const bufsize = (window_size / len) * len;
                 auto buffer = std::make_unique<char[]>(bufsize);
 
+                std::unique_ptr<BloomFilter> lbloom[num_threads];
+                for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
+                    lbloom[thread_num] = std::make_unique<BloomFilter>(bloom_filter_size);
+                }
+
                 // compute block fingerprints in parallel
                 in.seekg(0, std::ios_base::beg);
                 size_t block_offs = 0;
@@ -173,6 +178,7 @@ private:
                 result_.add("t_sample_" + std::to_string(len_exp_min_ + l), phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
                 
                 // map
+                BloomFilter bloom(bloom_filter_size);
                 ankerl::unordered_dense::map<Fingerprint, BlockIndex> fp_head;
                 ankerl::unordered_dense::map<BlockIndex, BlockIndex> fp_next;
 
@@ -188,6 +194,8 @@ private:
                     } else {
                         fp_head.emplace(fp, i);
                     }
+
+                    bloom.emplace(fp);
                 }
                 phase.stop();
                 std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms (" << fp_head.size() << " distinct blocks out of " << num_blocks << " total)" << std::endl;
@@ -246,16 +254,18 @@ private:
                             roll_fingerprint(fp, p);
 
                             // check if fingerprint matches any blocks
-                            auto it = fp_head.find(fp);
-                            if(it != fp_head.end()) {
-                                // push potential refs
-                                // TODO: check if even possible (i < block position)
-                                auto block = it->second;
-                                while(block != -1) {
-                                    local_block_refs.push_back(BlockRef{block, Index(i)});
+                            if(bloom.lookup(fp)) {
+                                auto it = fp_head.find(fp);
+                                if(it != fp_head.end()) {
+                                    // push potential refs
+                                    // TODO: check if even possible (i < block position)
+                                    auto block = it->second;
+                                    while(block != -1) {
+                                        local_block_refs.push_back(BlockRef{block, Index(i)});
 
-                                    auto it2 = fp_next.find(block);
-                                    block = (it2 != fp_next.end()) ? it2->second : -1;
+                                        auto it2 = fp_next.find(block);
+                                        block = (it2 != fp_next.end()) ? it2->second : -1;
+                                    }
                                 }
                             }
                         }
