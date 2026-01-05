@@ -93,6 +93,15 @@ private:
 
     template<typename InputStream>
     std::vector<LZRef2At> parse(InputStream& in, size_t const n) {
+        if(n - 1 > UINT32_MAX) {
+            return parse_impl<InputStream, uint64_t>(in, n);
+        } else {
+            return parse_impl<InputStream, uint32_t>(in, n);
+        }
+    }
+
+    template<typename InputStream, std::unsigned_integral Index>
+    std::vector<LZRef2At> parse_impl(InputStream& in, size_t const n) {
         result_ = {};
         internal::MemoryTimePhase overall, phase;
 
@@ -104,13 +113,21 @@ private:
         size_t const num_lens = len_exp_max_ - len_exp_min_ + 1;
         auto get_len = [&](size_t const l){ return 1ULL << (len_exp_min_ + l); };
 
+        using BlockIndex = uint32_t;
+        {
+            size_t const max_num_blocks = internal::idiv_ceil(n, get_len(num_lens));
+            if(max_num_blocks > UINT32_MAX) {
+                std::cerr << "too many blocks" << std::endl;
+                std::abort;
+            }
+        }
+
         overall.start();
         std::vector<LZRef2At> refs;
         {
             for(size_t l1 = num_lens; l1 > 0; l1--) {
                 auto const l = l1 - 1;
                 auto const len = get_len(l);
-
 
                 std::cerr << "processing l=" << (len_exp_min_ + l) << " (len=" << len << ") ..." << std::endl;
                 RK rk(rolling_fp_base_, len);
@@ -156,23 +173,24 @@ private:
                 result_.add("t_sample_" + std::to_string(len_exp_min_ + l), phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
                 
                 // map
-                ankerl::unordered_dense::map<Fingerprint, std::vector<size_t>> fp_to_blocks;
+                ankerl::unordered_dense::map<Fingerprint, BlockIndex> fp_head;
+                ankerl::unordered_dense::map<BlockIndex, BlockIndex> fp_next;
 
                 std::cerr << "\tmap ... "; std::cerr.flush();
                 phase.start();   
                 for(size_t i = 0; i < num_blocks; i++) {
                     auto const fp = block_fp[i];
-                    auto it = fp_to_blocks.find(fp);
-                    if(it != fp_to_blocks.end()) {
-                        it->second.push_back(i);
+                    auto it = fp_head.find(fp);
+                    if(it != fp_head.end()) {
+                        auto const j = it->second;
+                        fp_next[i] = j;
+                        it->second = i;
                     } else {
-                        std::vector<size_t> v;
-                        v.push_back(i);
-                        fp_to_blocks.emplace(fp, std::move(v));
+                        fp_head.emplace(fp, i);
                     }
                 }
                 phase.stop();
-                std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms (" << fp_to_blocks.size() << " distinct blocks out of " << num_blocks << " total)" << std::endl;
+                std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms (" << fp_head.size() << " distinct blocks out of " << num_blocks << " total)" << std::endl;
                 result_.add("t_map_" + std::to_string(len_exp_min_ + l), phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
 
                 // parse
@@ -200,9 +218,9 @@ private:
                 };
 
                 struct BlockRef {
-                    size_t block;
-                    size_t src;
-                };
+                    BlockIndex block;
+                    Index src;
+                } __attribute__((packed));
 
                 std::unique_ptr<std::vector<BlockRef>> lrefs[num_threads];
                 for(size_t x = 0; x < num_threads; x++) {
@@ -228,12 +246,16 @@ private:
                             roll_fingerprint(fp, p);
 
                             // check if fingerprint matches any blocks
-                            auto it = fp_to_blocks.find(fp);
-                            if(it != fp_to_blocks.end()) {
+                            auto it = fp_head.find(fp);
+                            if(it != fp_head.end()) {
                                 // push potential refs
                                 // TODO: check if even possible (i < block position)
-                                for(auto const block : it->second) {
-                                    local_block_refs.push_back(BlockRef{block, size_t(i)});
+                                auto block = it->second;
+                                while(block != -1) {
+                                    local_block_refs.push_back(BlockRef{block, Index(i)});
+
+                                    auto it2 = fp_next.find(block);
+                                    block = (it2 != fp_next.end()) ? it2->second : -1;
                                 }
                             }
                         }
