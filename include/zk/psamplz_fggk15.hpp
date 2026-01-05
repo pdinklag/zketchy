@@ -76,9 +76,9 @@ private:
         size_t src; // the (absolute) position to refer to (src < pos)
         size_t lxp; // the reference length exponent (len = 2^lxp)
         size_t pos; // the position at which to insert the reference
+        size_t len; // the reference length exponent (len = 2^lxp)
 
-        size_t len() const { return 1ULL << lxp; }
-        size_t end() const { return pos + len(); }
+        size_t end() const { return pos + len; }
     };
 
     using BloomFilter = internal::BloomFilter<Fingerprint, 2>;
@@ -106,16 +106,15 @@ private:
         internal::MemoryTimePhase overall, phase;
 
         size_t const window_size = std::min(window_size_, n);
-        size_t const bloom_filter_size = bloom_filter_scale_ * (n / (1ULL << len_exp_min_));
+        size_t const bloom_filter_size = bloom_filter_scale_ * (1ULL << len_exp_max_);
         size_t const num_threads = omp_get_max_threads();
 
-        size_t const len_max = 1ULL << len_exp_max_;
         size_t const num_lens = len_exp_max_ - len_exp_min_ + 1;
-        auto get_len = [&](size_t const l){ return 1ULL << (len_exp_min_ + l); };
+        auto get_num_blocks = [&](size_t const l){ return 1ULL << (len_exp_min_ + l); };
 
         using BlockIndex = uint32_t;
         {
-            size_t const max_num_blocks = internal::idiv_ceil(n, get_len(num_lens));
+            size_t const max_num_blocks = internal::idiv_ceil(n, get_num_blocks(num_lens));
             if(max_num_blocks > UINT32_MAX) {
                 std::cerr << "too many blocks" << std::endl;
                 std::abort;
@@ -125,9 +124,9 @@ private:
         overall.start();
         std::vector<LZRef2At> refs;
         {
-            for(size_t l1 = num_lens; l1 > 0; l1--) {
-                auto const l = l1 - 1;
-                auto const len = get_len(l);
+            for(size_t l = 0; l < num_lens; l++) {
+                auto const num_blocks = get_num_blocks(l);
+                auto const len = internal::idiv_ceil(n, num_blocks);
 
                 std::cerr << "processing l=" << (len_exp_min_ + l) << " (len=" << len << ") ..." << std::endl;
                 RK rk(rolling_fp_base_, len);
@@ -137,15 +136,9 @@ private:
                 phase.start();
 
                 // allocate block fingerprints
-                size_t const num_blocks = internal::idiv_ceil(n, len);
                 auto block_fp = std::make_unique<Fingerprint[]>(num_blocks);
                 auto const bufsize = (window_size / len) * len;
                 auto buffer = std::make_unique<char[]>(bufsize);
-
-                std::unique_ptr<BloomFilter> lbloom[num_threads];
-                for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
-                    lbloom[thread_num] = std::make_unique<BloomFilter>(bloom_filter_size);
-                }
 
                 // compute block fingerprints in parallel
                 in.seekg(0, std::ios_base::beg);
@@ -156,7 +149,6 @@ private:
                     if(!read) break;
 
                     auto const num_blocks_read = read / len;
-
                     #pragma omp parallel for
                     for(size_t i = 0; i < num_blocks_read; i++) {
                         auto const block_beg = i * len;
@@ -175,7 +167,6 @@ private:
 
                 phase.stop();
                 std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
-                result_.add("t_sample_" + std::to_string(len_exp_min_ + l), phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
                 
                 // map
                 BloomFilter bloom(bloom_filter_size);
@@ -199,7 +190,6 @@ private:
                 }
                 phase.stop();
                 std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms (" << fp_head.size() << " distinct blocks out of " << num_blocks << " total)" << std::endl;
-                result_.add("t_map_" + std::to_string(len_exp_min_ + l), phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
 
                 // parse
                 std::cerr << "\tparse ... "; std::cerr.flush();
@@ -277,7 +267,6 @@ private:
 
                 phase.stop();
                 std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
-                result_.add("t_parse_" + std::to_string(len_exp_min_ + l), phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
 
                 // make refs
                 std::cerr << "\tmake refs ... "; std::cout.flush();
@@ -313,7 +302,7 @@ private:
                     }
 
                     if(block_pos > next_possible_ref_pos && (next_ref >= refs.size() || block_pos + len <= refs[next_ref].pos) && block_src[i] != SIZE_MAX) {
-                        refs.push_back(LZRef2At{block_src[i], len_exp_min_ + l, block_pos});
+                        refs.push_back(LZRef2At{block_src[i], len_exp_min_ + l, block_pos, len});
                         next_possible_ref_pos = block_pos + len;
                         ++num_refs;
                     }
@@ -321,7 +310,6 @@ private:
 
                 phase.stop();
                 std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms (new refs: " << num_refs << ")" << std::endl;
-                result_.add("t_mkrefs_" + std::to_string(len_exp_min_ + l), phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
 
                 // sort refs
                 std::cout << "\tsort " << refs.size() << " refs ... "; std::cout.flush();
@@ -329,7 +317,6 @@ private:
                 std::sort(std::execution::par_unseq, refs.begin(), refs.end(), [](LZRef2At const& a, LZRef2At const& b){ return a.pos <= b.pos; });
                 phase.stop();
                 std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;
-                result_.add("t_sort_" + std::to_string(len_exp_min_ + l), phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
             }
         }
 
@@ -378,8 +365,8 @@ public:
             }
 
             // create reference
-            *out++ = lz77::Factor(i - it->src, it->len());
-            i += it->len();
+            *out++ = lz77::Factor(i - it->src, it->len);
+            i += it->len;
         }
 
         // create literal factors for the remaining literals
@@ -434,8 +421,8 @@ public:
                 nout += internal::encode_vbyte(out, it->src);
                 
                 // skip literals replaced by reference
-                i += it->len();
-                in.seekg(it->len(), std::ios_base::cur);
+                i += it->len;
+                in.seekg(it->len, std::ios_base::cur);
             }
 
             // copy remaining literals
