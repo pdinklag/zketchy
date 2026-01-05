@@ -6,17 +6,15 @@
 #define _ZK_SAMPLED_LPF_DEBUG
 #include <zk/sampled_lpf_factorizer.hpp>
 #include <zk/internal/io/block_coding.hpp>
+#include <zk/internal/io/vbyte_coding.hpp>
 #include <zk/internal/util/si_iec_literals.hpp>
 
 #include <zk/internal/benchmark.hpp>
 
 class SLZ77Tool : public cmdline::Program {
 private:
-    static constexpr uint64_t MAGIC =
-        ((uint64_t)'S') << 24 |
-        ((uint64_t)'Z') << 16 |
-        ((uint64_t)'7') << 8 |
-        ((uint64_t)'7');
+    static constexpr char const* MAGIC = "SZ77";
+    static constexpr size_t MAGIC_LEN = 4;
 
     static constexpr zk::internal::TokenType TOK_LITERAL = 0;
     static constexpr zk::internal::TokenType TOK_REF_LEN = 1;
@@ -39,6 +37,7 @@ private:
     uint64_t fp_window = 16;
 
     bool count_only = false;
+    bool vbyte_coding = false;
 
     static size_t factorize(zk::SampledLPFFactorizer& factorizer, std::string const& s) {
         size_t z = 0;
@@ -52,17 +51,33 @@ private:
         return z;
     }
 
-    static size_t factorize(zk::SampledLPFFactorizer& factorizer, std::string const& s, auto& enc) {
+    static size_t factorize_vbyte(zk::SampledLPFFactorizer& factorizer, std::string const& s, iopp::FileOutputStream& out) {
         size_t z = 0;
         factorizer.factorize(s.begin(), s.end(),
             [&](lz77::Factor literal){
-                    enc.write_uint(TOK_REF_LEN, 0);
-                    enc.write_char(TOK_LITERAL, literal.literal());
+                zk::internal::encode_vbyte(out, 0);
+                out.put(literal.literal());
                 ++z;
             },
             [&](lz77::Factor ref){
-                    enc.write_uint(TOK_REF_LEN, ref.len);
-                    enc.write_uint(TOK_REF_SRC, ref.src);
+                zk::internal::encode_vbyte(out, ref.len);
+                zk::internal::encode_vbyte(out, ref.src);
+                ++z;
+            });
+        return z;
+    }
+
+    static size_t factorize_block_enc(zk::SampledLPFFactorizer& factorizer, std::string const& s, auto& enc) {
+        size_t z = 0;
+        factorizer.factorize(s.begin(), s.end(),
+            [&](lz77::Factor literal){
+                enc.write_uint(TOK_REF_LEN, 0);
+                enc.write_char(TOK_LITERAL, literal.literal());
+                ++z;
+            },
+            [&](lz77::Factor ref){
+                enc.write_uint(TOK_REF_LEN, ref.len);
+                enc.write_uint(TOK_REF_SRC, ref.src);
                 ++z;
             });
         return z;
@@ -77,6 +92,7 @@ public:
         option('p', "prefix", prefix, "Process only this prefix of the input file.");
         option('o', "out", output_filename, "The output filename.");
         option('d', "decompress", decompress, "Decompress the input file rather than compressing it.");
+        option("vbyte", vbyte_coding, "Use V-Byte encoding of phrases -- better suits the output for pipelining to other compressors.");
         option("count", count_only, "Only count the factors, don't actually write to the output file.");
     }
 
@@ -89,29 +105,41 @@ public:
             std::string s;
             {
                 iopp::FileInputStream fin(filename);
-                auto in = iopp::bitwise_input_from(fin);
 
-                zk::internal::BlockDecoder dec(in);
-
-                uint64_t const magic = in.read(32);
-                if(magic != MAGIC) {
-                    std::cerr << "wrong magic: 0x" << std::hex << magic << " (expected: 0x" << MAGIC << ")" << std::endl;
-                    std::abort();
-                }
-
-                auto const n = in.read(64);
-                setup_encoding(dec, n);
-
-                while(in) {
-                    auto const len = dec.read_uint(TOK_REF_LEN);
-                    if(len == 0) {
-                        s.push_back(dec.read_char(TOK_LITERAL));
-                    } else {
-                        auto const src = s.length() - dec.read_uint(TOK_REF_SRC);
-                        for(size_t i = 0; i < len; i++) {
-                            s.push_back(s[src + i]);
+                // check magic
+                {
+                    char magic[MAGIC_LEN];
+                    fin.read(magic, MAGIC_LEN);
+                    for(size_t i = 0; i < MAGIC_LEN; i++) {
+                        if(magic[i] != MAGIC[i]) {
+                            std::cerr << "wrong magic" << std::endl;
+                            std::abort();
                         }
                     }
+                }
+
+                char const mode = fin.get();
+                if(mode == 'B') {
+                    auto in = iopp::bitwise_input_from(fin);
+
+                    zk::internal::BlockDecoder dec(in);
+                    auto const n = in.read(64);
+                    setup_encoding(dec, n);
+
+                    while(in) {
+                        auto const len = dec.read_uint(TOK_REF_LEN);
+                        if(len == 0) {
+                            s.push_back(dec.read_char(TOK_LITERAL));
+                        } else {
+                            auto const src = s.length() - dec.read_uint(TOK_REF_SRC);
+                            for(size_t i = 0; i < len; i++) {
+                                s.push_back(s[src + i]);
+                            }
+                        }
+                    }
+                } else {
+                    std::cerr << "decompression not implemented for mode '" << mode << "'" << std::endl;
+                    std::abort();
                 }
             }
 
@@ -139,17 +167,25 @@ public:
                 t.start();
                 if(!count_only) {
                     iopp::FileOutputStream fout(output_filename);
-                    auto out = iopp::bitwise_output_to(fout);
+                    fout.write(MAGIC, MAGIC_LEN);
 
-                    zk::internal::BlockEncoder enc(out, block_size);
+                    if(vbyte_coding) {
+                        fout.put('V');
+                        zk::internal::encode_vbyte(fout, n);
+                        z = factorize_vbyte(lz77, s, fout);
+                    } else {
+                        fout.put('B');
+                        auto out = iopp::bitwise_output_to(fout);
 
-                    out.write(MAGIC, 32);
-                    out.write(n, 64);
-                    setup_encoding(enc, n);
+                        zk::internal::BlockEncoder enc(out, block_size);
 
-                    z = factorize(lz77, s, enc);
+                        out.write(n, 64);
+                        setup_encoding(enc, n);
 
-                    enc.flush();
+                        z = factorize_block_enc(lz77, s, enc);
+
+                        enc.flush();
+                    }
                 } else {
                     z = factorize(lz77, s);
                 }
