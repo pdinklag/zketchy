@@ -30,16 +30,22 @@ namespace zk {
 
 class SampledLPFFactorizer {
 private:
-    #ifdef _ZK_SAMPLED_LPF_DEBUG
     static constexpr bool debug_ = true;
-    #else
-    static constexpr bool debug_ = false;
-    #endif
 
     using RK = fp::RabinKarp31;
     using RK64 = fp::RabinKarp61;
     using Fingerprint = RK::Fingerprint;
     using Fingerprint64 = RK64::Fingerprint;
+
+    using MIndex = uint32_t; // nb: we generally assume that we won't ever have more than 4G metacharacters...
+    using MLength = uint32_t;
+
+    template<std::unsigned_integral Index>
+    struct Metachar {
+        Index occ;
+        MLength len;
+        Fingerprint64 fp;
+    } __attribute__((packed));
 
     static constexpr Fingerprint rolling_fp_base_ = (1ULL << 16) - 39;
     static constexpr size_t MAX_SIZE_32BIT = 1ULL << 31;
@@ -47,27 +53,15 @@ private:
     size_t sampling_;
     size_t fp_window_;
 
-    using MIndex = uint32_t; // nb: we generally assume that we won't ever have more than 4G metacharacters...
-    using MLength = uint32_t;
+    template<std::unsigned_integral Index>
+    void parse(std::string_view const& t, std::vector<Metachar<Index>>& meta, std::vector<MIndex> parsing) {
+        using M = Metachar<Index>;
 
-    template<bool require_64bit>
-    void factorize(std::string_view const& t, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
-        using Index = std::conditional_t<require_64bit, uint64_t, uint32_t>;
-        
-        struct Metachar {
-            Index occ;
-            MLength len;
-            Fingerprint64 fp;
-        } __attribute__((packed));
-
-        // prefix free parsing
         Index const n = t.size();
         auto const num_threads = omp_get_max_threads();
         Index const num_per_thread = internal::idiv_ceil(n, num_threads);
 
         internal::MemoryTimePhase phase;
-
-        size_t gap_total = 0, gap_num = 0;
 
         if constexpr(debug_) {
             std::cout << "parallel pre-parse ... ";
@@ -75,7 +69,7 @@ private:
             phase.start();
         }
 
-        std::unique_ptr<std::vector<Metachar>> lpre_parse[num_threads];
+        std::unique_ptr<std::vector<M>> lpre_parsing[num_threads];
         {
             RK rk_trigger(rolling_fp_base_, fp_window_);
             RK64 rk_meta(rolling_fp_base_);
@@ -89,9 +83,9 @@ private:
                 Index const beg = thread_num * num_per_thread;
                 Index const end = std::min(beg + num_per_thread, n);
 
-                lpre_parse[thread_num] = std::make_unique<std::vector<Metachar>>();
-                auto& local_pre_parse = *lpre_parse[thread_num];
-                local_pre_parse.reserve(size_t(1.2 * double(n) / double(s * num_threads))); // exaggerate a little bit to account for standard deviation
+                lpre_parsing[thread_num] = std::make_unique<std::vector<M>>();
+                auto& local_pre_parsing = *lpre_parsing[thread_num];
+                local_pre_parsing.reserve(size_t(1.2 * double(n) / double(s * num_threads))); // exaggerate a little bit to account for standard deviation
 
                 Fingerprint fp_trigger = 0;
                 Fingerprint64 fp_meta = 0;
@@ -119,7 +113,7 @@ private:
 
                 for(; i < end; i++) {
                     if(i - last >= min_metachar_len && (fp_trigger & s) == 0) {
-                        local_pre_parse.push_back(Metachar{ last, MLength(i - last), fp_meta });
+                        local_pre_parsing.push_back(M{ last, MLength(i - last), fp_meta });
                         last = i;
                         fp_meta = 0;
                     }
@@ -129,20 +123,20 @@ private:
                 }
 
                 if(last < i) {
-                    local_pre_parse.push_back(Metachar{ last, MLength(i - last), fp_meta });
+                    local_pre_parsing.push_back(M{ last, MLength(i - last), fp_meta });
                 }
             }
         }
 
-        size_t pre_parse_size = 0;
+        size_t pre_parsing_size = 0;
         for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
-            pre_parse_size += lpre_parse[thread_num]->size();
+            pre_parsing_size += lpre_parsing[thread_num]->size();
         }
 
         if constexpr(debug_) {
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
-            std::cout << "\tparse size: " << pre_parse_size << std::endl;
+            std::cout << "\tparsing size: " << pre_parsing_size << std::endl;
         }
 
         if constexpr(debug_) {
@@ -151,20 +145,18 @@ private:
             phase.start();
         }
 
-        std::vector<Metachar> meta;
         size_t meta_len_total = 0;
-        std::vector<MIndex> parse;
-        parse.reserve(pre_parse_size);
+        parsing.reserve(pre_parsing_size);
         {
             ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps;
             for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
-                for(auto& x : *lpre_parse[thread_num]) {
+                for(auto& x : *lpre_parsing[thread_num]) {
                     auto const fp = x.fp;
                     auto it = meta_fps.find(fp);
                     if(it != meta_fps.end()) {
-                        parse.push_back(it->second);
+                        parsing.push_back(it->second);
                     } else {
-                        parse.push_back(MIndex(meta.size()));
+                        parsing.push_back(MIndex(meta.size()));
 
                         meta_fps.emplace(fp, meta.size());
                         meta.push_back(x);
@@ -172,22 +164,44 @@ private:
                         meta_len_total += x.len;
                     }
                 }
-                lpre_parse[thread_num].reset();
+                lpre_parsing[thread_num].reset();
             }
         }
 
         if(meta.size() >= 4_Gi) std::abort(); // if this happens, you wouldn't want to wait for the result anyway
         meta.shrink_to_fit();
 
-        auto const m = parse.size();
-        auto const sigma = meta.size();
-
         if constexpr(debug_) {
             phase.stop();
+
+            auto const m = parsing.size();
+            auto const sigma = meta.size();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
             std::cout << "\tdistinct metacharacters: " << sigma << std::endl;
             std::cout << "\taverage length: " << double(meta_len_total) / double(sigma) << " (total: " << meta_len_total << ")" << std::endl;
         }
+    }
+
+    template<bool require_64bit>
+    void factorize(std::string_view const& t, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
+        using Index = std::conditional_t<require_64bit, uint64_t, uint32_t>;
+        using M = Metachar<Index>;
+
+        Index const n = t.size();
+        auto const num_threads = omp_get_max_threads();
+        Index const num_per_thread = internal::idiv_ceil(n, num_threads);
+
+        internal::MemoryTimePhase phase;
+
+        size_t gap_total = 0, gap_num = 0;
+
+        // parsing
+        std::vector<M> meta;
+        std::vector<MIndex> parsing;
+        parse<Index>(t, meta, parsing);
+
+        auto const m = parsing.size();
+        auto const sigma = meta.size();
 
         // sort meta characters
         if constexpr(debug_) {
@@ -226,7 +240,7 @@ private:
                 size_t i = 0;
                 for(size_t j = 0; j < m; j++) {
                     parse_beg[j] = i;
-                    i += meta[parse[j]].len;
+                    i += meta[parsing[j]].len;
                 }
             }
 
@@ -238,7 +252,7 @@ private:
 
             // rewrite parsing
             for(size_t j = 0; j < m; j++) {
-                parse[j] = meta_sorted_inv[parse[j]];
+                parsing[j] = meta_sorted_inv[parsing[j]];
             }
         }
 
@@ -257,9 +271,9 @@ private:
         auto const sa_extra_space = 6 * sigma; // recommended for libsais
         auto sa = std::make_unique<Index[]>(m + sa_extra_space);
         if constexpr(require_64bit) {
-            libsais64_long((int64_t*)parse.data(), (int64_t*)sa.get(), m, meta.size(), sa_extra_space);
+            libsais64_long((int64_t*)parsing.data(), (int64_t*)sa.get(), m, meta.size(), sa_extra_space);
         } else {
-            libsais_int((int32_t*)parse.data(), (int32_t*)sa.get(), m, meta.size(), sa_extra_space);
+            libsais_int((int32_t*)parsing.data(), (int32_t*)sa.get(), m, meta.size(), sa_extra_space);
         }
 
         if constexpr(debug_) {
@@ -318,8 +332,8 @@ private:
 
                 // first compare meta characters
                 matched_meta = 0;
-                while(meta_dst + matched_meta < m && meta_src + matched_meta < m && parse[meta_dst + matched_meta] == parse[meta_src + matched_meta]) {
-                    l += get_meta(parse[meta_dst + matched_meta]).len;
+                while(meta_dst + matched_meta < m && meta_src + matched_meta < m && parsing[meta_dst + matched_meta] == parsing[meta_src + matched_meta]) {
+                    l += get_meta(parsing[meta_dst + matched_meta]).len;
                     ++matched_meta;
                 }
 
@@ -388,9 +402,9 @@ private:
                     if(rext > 0) {
                         // we have encoded characters from the following meta characters
                         ++j;
-                        while(j < m && rext >= get_meta(parse[j]).len) {
+                        while(j < m && rext >= get_meta(parsing[j]).len) {
                             // TODO: we may have skipped additional metacharacters... but HOW???
-                            rext -= get_meta(parse[j]).len;
+                            rext -= get_meta(parsing[j]).len;
                             ++j;
                         }
                     }
