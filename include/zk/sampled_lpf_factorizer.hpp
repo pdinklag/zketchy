@@ -54,7 +54,7 @@ private:
     size_t fp_window_;
 
     template<std::unsigned_integral Index>
-    void parse(std::string_view const& t, std::vector<Metachar<Index>>& meta, std::vector<MIndex> parsing) {
+    void parse(std::string_view const& t, std::vector<Metachar<Index>>& meta, std::vector<MIndex>& parsing) {
         using M = Metachar<Index>;
 
         Index const n = t.size();
@@ -145,6 +145,7 @@ private:
             phase.start();
         }
 
+        std::vector<M> pre_meta;
         size_t meta_len_total = 0;
         parsing.reserve(pre_parsing_size);
         {
@@ -156,10 +157,10 @@ private:
                     if(it != meta_fps.end()) {
                         parsing.push_back(it->second);
                     } else {
-                        parsing.push_back(MIndex(meta.size()));
+                        parsing.push_back(MIndex(pre_meta.size()));
 
-                        meta_fps.emplace(fp, meta.size());
-                        meta.push_back(x);
+                        meta_fps.emplace(fp, pre_meta.size());
+                        pre_meta.push_back(x);
 
                         meta_len_total += x.len;
                     }
@@ -168,17 +169,69 @@ private:
             }
         }
 
-        if(meta.size() >= 4_Gi) std::abort(); // if this happens, you wouldn't want to wait for the result anyway
-        meta.shrink_to_fit();
+        if(pre_meta.size() >= 4_Gi) std::abort(); // if this happens, you wouldn't want to wait for the result anyway
+        pre_meta.shrink_to_fit();
+
+        auto const m = parsing.size();
+        auto const sigma = pre_meta.size();
 
         if constexpr(debug_) {
             phase.stop();
 
-            auto const m = parsing.size();
-            auto const sigma = meta.size();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
             std::cout << "\tdistinct metacharacters: " << sigma << std::endl;
             std::cout << "\taverage length: " << double(meta_len_total) / double(sigma) << " (total: " << meta_len_total << ")" << std::endl;
+        }
+
+        // sort meta characters
+        if constexpr(debug_) {
+            std::cout << "sort metacharacters ... ";
+            std::cout.flush();
+            phase.start();
+        }
+
+        auto meta_order = std::make_unique<MIndex[]>(sigma);
+        {
+            std::iota(meta_order.get(), meta_order.get() + sigma, 0);
+            std::sort(std::execution::par_unseq, meta_order.get(), meta_order.get() + sigma, [&](MIndex const a, MIndex const b){
+                return std::string_view(t.data() + pre_meta[a].occ, pre_meta[a].len).compare(std::string_view(t.data() + pre_meta[b].occ, pre_meta[b].len)) < 0;
+            });
+        }
+
+        if constexpr(debug_) {
+            phase.stop();
+            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
+        }
+
+        // parse text
+        if constexpr(debug_) {
+            std::cout << "compute parsing ... ";
+            std::cout.flush();
+            phase.start();
+        }
+
+        {
+            // inverse metacharacter order
+            auto meta_sorted_inv = std::make_unique<MIndex[]>(sigma);
+            for(size_t i = 0; i < sigma; i++) {
+                meta_sorted_inv[meta_order[i]] = i;
+            }
+
+            // rewrite parsing
+            for(size_t j = 0; j < m; j++) {
+                parsing[j] = meta_sorted_inv[parsing[j]];
+            }
+        }
+
+        // rewrite meta
+        meta.reserve(sigma);
+        for(size_t i = 0; i < sigma; i++) {
+            meta.push_back(pre_meta[meta_order[i]]);
+        }
+
+        if constexpr(debug_) {
+            phase.stop();
+            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
         }
     }
 
@@ -203,62 +256,14 @@ private:
         auto const m = parsing.size();
         auto const sigma = meta.size();
 
-        // sort meta characters
-        if constexpr(debug_) {
-            std::cout << "sort metacharacters ... ";
-            std::cout.flush();
-            phase.start();
-        }
-
-        auto meta_sorted = std::make_unique<MIndex[]>(sigma);
+        // compute starting positions of phrases
+        auto parsing_beg = std::make_unique<Index[]>(m);
         {
-            for(size_t i = 0; i < sigma; i++) {
-                meta_sorted[i] = i;
-            }
-
-            std::sort(std::execution::par_unseq, meta_sorted.get(), meta_sorted.get() + sigma, [&](MIndex const a, MIndex const b){
-                return std::string_view(t.data() + meta[a].occ, meta[a].len).compare(std::string_view(t.data() + meta[b].occ, meta[b].len)) < 0;
-            });
-        }
-
-        if constexpr(debug_) {
-            phase.stop();
-            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
-        }
-
-        // parse text
-        if constexpr(debug_) {
-            std::cout << "compute parsing ... ";
-            std::cout.flush();
-            phase.start();
-        }
-
-        auto parse_beg = std::make_unique<Index[]>(m);
-        {
-            // compute starting positions of phrases
-            {
-                size_t i = 0;
-                for(size_t j = 0; j < m; j++) {
-                    parse_beg[j] = i;
-                    i += meta[parsing[j]].len;
-                }
-            }
-
-            // inverse metacharacter order
-            auto meta_sorted_inv = std::make_unique<MIndex[]>(sigma);
-            for(size_t i = 0; i < sigma; i++) {
-                meta_sorted_inv[meta_sorted[i]] = i;
-            }
-
-            // rewrite parsing
+            size_t i = 0;
             for(size_t j = 0; j < m; j++) {
-                parsing[j] = meta_sorted_inv[parsing[j]];
+                parsing_beg[j] = i;
+                i += meta[parsing[j]].len;
             }
-        }
-
-        if constexpr(debug_) {
-            phase.stop();
-            std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
         }
 
         // compute suffix array of parsing
@@ -271,9 +276,9 @@ private:
         auto const sa_extra_space = 6 * sigma; // recommended for libsais
         auto sa = std::make_unique<Index[]>(m + sa_extra_space);
         if constexpr(require_64bit) {
-            libsais64_long((int64_t*)parsing.data(), (int64_t*)sa.get(), m, meta.size(), sa_extra_space);
+            libsais64_long((int64_t*)parsing.data(), (int64_t*)sa.get(), m, sigma, sa_extra_space);
         } else {
-            libsais_int((int32_t*)parsing.data(), (int32_t*)sa.get(), m, meta.size(), sa_extra_space);
+            libsais_int((int32_t*)parsing.data(), (int32_t*)sa.get(), m, sigma, sa_extra_space);
         }
 
         if constexpr(debug_) {
@@ -301,8 +306,6 @@ private:
         }
 
         // factorize
-        auto get_meta = [&](MIndex const i){ return meta[meta_sorted[i]]; };
-    
         struct Ref {
             Index beg, src, len;
             Index end() const { return beg + len - 1; }
@@ -333,7 +336,7 @@ private:
                 // first compare meta characters
                 matched_meta = 0;
                 while(meta_dst + matched_meta < m && meta_src + matched_meta < m && parsing[meta_dst + matched_meta] == parsing[meta_src + matched_meta]) {
-                    l += get_meta(parsing[meta_dst + matched_meta]).len;
+                    l += meta[parsing[meta_dst + matched_meta]].len;
                     ++matched_meta;
                 }
 
@@ -344,16 +347,16 @@ private:
                 if(matched_meta >= 1) {
                     // ... to the right
                     {
-                        size_t const x = parse_beg[meta_dst] + l;
-                        size_t const y = parse_beg[meta_src] + l;
+                        size_t const x = parsing_beg[meta_dst] + l;
+                        size_t const y = parsing_beg[meta_src] + l;
                         while(x + rext < n && y + rext < n && t[x + rext] == t[y + rext]) {
                             ++rext;
                         }
                     }
                     // ... and to the left
                     {
-                        size_t x = parse_beg[meta_dst];
-                        size_t y = parse_beg[meta_src];
+                        size_t x = parsing_beg[meta_dst];
+                        size_t y = parsing_beg[meta_src];
                         while(y > 0 && t[x-1] == t[y-1]) {
                             --x;
                             --y;
@@ -382,14 +385,14 @@ private:
                 size_t dst, src, lcp, matched_meta, rext;
                 if(psv_lcp > nsv_lcp) {
                     lcp = psv_lcp;
-                    dst = parse_beg[j] - psv_lext;
-                    src = dst - (parse_beg[sa[psv_pos]] - psv_lext);
+                    dst = parsing_beg[j] - psv_lext;
+                    src = dst - (parsing_beg[sa[psv_pos]] - psv_lext);
                     matched_meta = psv_matched_meta;
                     rext = psv_rext;
                 } else {
                     lcp = nsv_lcp;
-                    dst = parse_beg[j] - nsv_lext;
-                    src = dst - (parse_beg[sa[nsv_pos]] - nsv_lext);
+                    dst = parsing_beg[j] - nsv_lext;
+                    src = dst - (parsing_beg[sa[nsv_pos]] - nsv_lext);
                     matched_meta = nsv_matched_meta;
                     rext = nsv_rext;
                 }
@@ -402,9 +405,9 @@ private:
                     if(rext > 0) {
                         // we have encoded characters from the following meta characters
                         ++j;
-                        while(j < m && rext >= get_meta(parsing[j]).len) {
+                        while(j < m && rext >= meta[parsing[j]].len) {
                             // TODO: we may have skipped additional metacharacters... but HOW???
-                            rext -= get_meta(parsing[j]).len;
+                            rext -= meta[parsing[j]].len;
                             ++j;
                         }
                     }
