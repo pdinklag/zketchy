@@ -49,9 +49,10 @@ public:
 
     inline MemoryInputStream& read(char* outp, size_t const num) {
         gcount_ = std::min(num, size_ - pos_);
-        for(size_t i = 0; i < gcount_; i++) {
-            *outp++ = data_[pos_++];
-        }
+
+        std::memcpy(outp, data_ + pos_, gcount_);
+        pos_ += gcount_;
+
         return *this;
     }
 
