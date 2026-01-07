@@ -420,6 +420,7 @@ public:
         auto refs = parse(in, n);
 
         // encode
+        auto buffer = std::make_unique<char[]>(window_size_);
         size_t z = 0;
         size_t nout = 0;
         {
@@ -437,8 +438,12 @@ public:
                 auto copy_literals = [&](size_t const num_literals){
                     nout += internal::encode_vbyte(out, num_literals);
                     
-                    for(size_t j = 0; j < num_literals; j++) {
-                        out.put(in.get());
+                    size_t num_written = 0;
+                    while(num_written < num_literals) {
+                        in.read(buffer.get(), std::min(num_literals, window_size_));
+                        auto const w = in.gcount();
+                        out.write(buffer.get(), w);
+                        num_written += w;
                     }
 
                     z += num_literals;
