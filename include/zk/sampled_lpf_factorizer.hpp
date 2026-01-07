@@ -54,7 +54,7 @@ private:
     size_t fp_window_;
 
     template<std::unsigned_integral Index>
-    void parse(std::string_view const& t, std::vector<Metachar<Index>>& meta, std::vector<MIndex>& parsing) {
+    void parse(std::string_view const& t, std::vector<Metachar<Index>>& meta, std::vector<Index>& parsing) {
         using M = Metachar<Index>;
 
         Index const n = t.size();
@@ -157,7 +157,7 @@ private:
                     if(it != meta_fps.end()) {
                         parsing.push_back(it->second);
                     } else {
-                        parsing.push_back(MIndex(pre_meta.size()));
+                        parsing.push_back(Index(pre_meta.size()));
 
                         meta_fps.emplace(fp, pre_meta.size());
                         pre_meta.push_back(x);
@@ -250,7 +250,7 @@ private:
 
         // parsing
         std::vector<M> meta;
-        std::vector<MIndex> parsing;
+        std::vector<Index> parsing;
         parse<Index>(t, meta, parsing);
 
         auto const m = parsing.size();
