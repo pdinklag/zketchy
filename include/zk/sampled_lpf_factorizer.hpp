@@ -8,6 +8,7 @@
 #include <execution>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <vector>
@@ -23,6 +24,8 @@
 #include <libsais64.h>
 
 #include "internal/benchmark.hpp"
+#include "internal/io/memory_input_stream.hpp"
+#include "internal/io/overlapping_blocks.hpp"
 #include "internal/util/idiv_ceil.hpp"
 #include "internal/util/si_iec_literals.hpp"
 
@@ -53,9 +56,19 @@ private:
     size_t sampling_;
     size_t fp_window_;
 
-    template<bool require_64bit>
+    template<std::unsigned_integral Index>
     void factorize(std::string_view const& t, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
-        using Index = std::conditional_t<require_64bit, uint64_t, uint32_t>;
+        internal::MemoryInputStream in(t.data(), t.length());
+        factorize<decltype(in), Index, true>(in, t, emit_literal, emit_reference);
+    }
+
+    template<typename InputStream, std::unsigned_integral Index>
+    void factorize(InputStream& in, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
+        factorize<decltype(in), Index, false>(in, std::string_view(), emit_literal, emit_reference);
+    }
+
+    template<typename InputStream, std::unsigned_integral Index, bool has_text_access>
+    void factorize(InputStream& in, std::string_view const& t, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
         using M = Metachar<Index>;
 
         Index const n = t.size();
@@ -264,7 +277,7 @@ private:
 
         auto const sa_extra_space = 6 * sigma; // recommended for libsais
         auto sa = std::make_unique<Index[]>(m + sa_extra_space);
-        if constexpr(require_64bit) {
+        if constexpr(std::numeric_limits<Index>::digits > 32) {
             libsais64_long((int64_t*)parsing.data(), (int64_t*)sa.get(), m, sigma, sa_extra_space);
         } else {
             libsais_int((int32_t*)parsing.data(), (int32_t*)sa.get(), m, sigma, sa_extra_space);
@@ -482,9 +495,9 @@ public:
 
         // FIXME: whether or not we need 64 bits should depend on the size of the PARSING, not the input
         if(n < MAX_SIZE_32BIT) {
-            factorize<false>(t, emit_literal, emit_reference);
+            factorize<uint32_t>(t, emit_literal, emit_reference);
         } else {
-            factorize<true>(t, emit_literal, emit_reference);
+            factorize<uint64_t>(t, emit_literal, emit_reference);
         }
     }
 
