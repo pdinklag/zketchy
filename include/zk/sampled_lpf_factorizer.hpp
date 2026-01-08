@@ -48,6 +48,7 @@ private:
         Index occ;
         MLength len;
         Fingerprint64 fp;
+        size_t thread_num;
     } __attribute__((packed));
 
     static constexpr Fingerprint rolling_fp_base_ = (1ULL << 16) - 39;
@@ -86,12 +87,9 @@ private:
             auto roll_trigger = [&](Fingerprint& fp, char const* p){ fp = rk_trigger.roll(fp, *(p-fp_window_), *p); };
             auto push_meta = [&](Fingerprint64& fp, char const* p){ fp = rk_meta.push(fp, *p); };
 
-            size_t const min_metachar_len = s / 2; // at least w!
             std::vector<std::unique_ptr<std::vector<M>>> pre_parsing;
 
             if constexpr(has_text_access) {
-                char const* t_beg = t.data();
-
                 for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
                     pre_parsing.emplace_back(std::make_unique<std::vector<M>>());
                 }
@@ -103,8 +101,11 @@ private:
                     auto& local_pre_parsing = *pre_parsing[thread_num];
                     local_pre_parsing.reserve(size_t(1.2 * double(n) / double(s * num_threads))); // exaggerate a little bit to account for standard deviation
 
+                    char const* t_beg = t.data();
+                    char const* t_end = t_beg + n;
+
                     char const* beg = t_beg + thread_num * num_per_thread;
-                    char const* end = std::min(beg + num_per_thread, t_beg + n);
+                    char const* end = std::min(beg + num_per_thread, t_end);
 
                     Fingerprint fp_trigger = 0;
                     Fingerprint64 fp_meta = 0;
@@ -119,21 +120,18 @@ private:
                     char const* last = beg;
                     char const* p = beg;
 
-                    for(; p < end && p < beg + fp_window_; p++) {
-                        if(thread_num == 0) {
-                            // initialize
+                    // the first thread must fingerprint the initial window
+                    if(thread_num == 0) {
+                        for(; p < end && p < beg + fp_window_; p++) {
                             push_trigger(fp_trigger, p);
-                        } else {
-                            // roll
-                            roll_trigger(fp_trigger, p);
+                            push_meta(fp_meta, p);
                         }
-                        push_meta(fp_meta, p);
                     }
 
-                    for(; p < end; p++) {
-                        if(p - last >= min_metachar_len && (fp_trigger & s) == 0) {
-                            local_pre_parsing.push_back(M{ Index(last - t_beg), MLength(p - last), fp_meta });
-                            last = p; // TODO: for a proper prefix-free parsing, subtract fp_window_
+                    for(; last < end && p < t_end; p++) {
+                        if((fp_trigger & s) == 0) {
+                            local_pre_parsing.push_back(M{ Index(last - t_beg), MLength(p - last), fp_meta, thread_num });
+                            last = p;
                             fp_meta = 0;
                         }
 
@@ -141,8 +139,9 @@ private:
                         push_meta(fp_meta, p);
                     }
 
-                    if(last < p) {
-                        local_pre_parsing.push_back(M{ Index(last - t_beg), MLength(p - last), fp_meta });
+                    // the last thread MUST introduce the final metacharacter!
+                    if(thread_num == num_threads - 1 && last < t_end) {
+                        local_pre_parsing.push_back(M{ Index(last - t_beg), MLength(t_end - last), fp_meta, thread_num });
                     }
                 }
             } else {
@@ -188,8 +187,17 @@ private:
             parsing.reserve(pre_parsing_length);
             {
                 ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps;
+                size_t pos = 0;
+                size_t skipped = 0;
                 for(size_t i = 0; i < num_threads; i++) {
-                    for(auto& x : *pre_parsing[i]) {
+                    for(auto const& x : *pre_parsing[i]) {
+                        if(x.occ < pos) {
+                            // a thread may have parsed beyond its block boundary to the next trigger string
+                            ++skipped;
+                            continue;
+                        };
+                        if(x.occ > pos)[[unlikely]] std::abort();
+
                         auto const fp = x.fp;
                         auto it = meta_fps.find(fp);
                         if(it != meta_fps.end()) {
@@ -202,9 +210,12 @@ private:
 
                             meta_len_total += x.len;
                         }
+
+                        pos += x.len;
                     }
                     pre_parsing[i].reset();
                 }
+                std::cout << "(skipped=" << skipped << ", final pos=" << pos << ") ";
             }
 
             if(pre_meta.size() >= 4_Gi) std::abort(); // if this happens, you wouldn't want to wait for the result anyway
@@ -232,7 +243,15 @@ private:
             {
                 std::iota(meta_order.get(), meta_order.get() + sigma, 0);
                 std::sort(std::execution::par_unseq, meta_order.get(), meta_order.get() + sigma, [&](MIndex const a, MIndex const b){
-                    return std::string_view(t.data() + pre_meta[a].occ, pre_meta[a].len).compare(std::string_view(t.data() + pre_meta[b].occ, pre_meta[b].len)) < 0;
+                    auto const la = pre_meta[a].len + fp_window_;
+                    size_t pa = pre_meta[a].occ;
+                    if(pa) pa -= fp_window_;
+
+                    auto const lb = pre_meta[a].len + fp_window_;
+                    size_t pb = pre_meta[b].occ;
+                    if(pb) pb -= fp_window_;
+
+                    return std::string_view(t.data() + pa, la).compare(std::string_view(t.data() + pb, lb)) < 0;
                 });
             }
 
@@ -426,9 +445,7 @@ private:
                         // we have encoded characters from the following meta characters
                         ++j;
                         while(j < m && rext >= meta[parsing[j]].len) {
-                            // TODO: we may have skipped additional metacharacters... but HOW???
-                            // ANSWER: because the "suffix array" may not actually be THE suffix array, because we do not guarantee prefix-freeness of metacharacters
-                            //         however, this does not harm the LZ77 algorithm based on LPF per sé
+                            // TODO: we may have skipped additional metacharacters... but HOW??? (happens very rarely)
                             rext -= meta[parsing[j]].len;
                             ++j;
                         }
