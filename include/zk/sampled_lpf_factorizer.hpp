@@ -371,13 +371,13 @@ private:
             ssize_t psv_pos = (ssize_t)cur_pos - 1;
             while (psv_pos >= 0 && sa[psv_pos] > j) --psv_pos;
 
-            size_t psv_matched_meta, psv_rext, psv_lext;
+            size_t psv_matched_meta = 0, psv_rext, psv_lext;
             size_t const psv_lcp = psv_pos >= 0 ? lce(j, (size_t)sa[psv_pos], psv_matched_meta, psv_rext, psv_lext) : 0;
 
             size_t nsv_pos = cur_pos + 1;
             while(nsv_pos < m && sa[nsv_pos] > j) ++nsv_pos;
 
-            size_t nsv_matched_meta, nsv_rext, nsv_lext;
+            size_t nsv_matched_meta = 0, nsv_rext, nsv_lext;
             size_t const nsv_lcp = nsv_pos < m ? lce(j, (size_t)sa[nsv_pos], nsv_matched_meta, nsv_rext, nsv_lext) : 0;
 
             if(psv_matched_meta >= 1 || nsv_matched_meta >= 1) {
