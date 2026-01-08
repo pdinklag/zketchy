@@ -35,6 +35,7 @@ private:
 
     uint64_t sampling = 4;
     uint64_t fp_window = 16;
+    uint64_t window = 0;
 
     bool count_only = false;
     bool vbyte_coding = false;
@@ -90,6 +91,7 @@ public:
         option('l', "len", fp_window, "The fingerprint window size.");
         option('b', "block-size", block_size, "The block size for encoding.");
         option('p', "prefix", prefix, "Process only this prefix of the input file.");
+        option('w', "window", window, "The input window size; leave at 0 to load entire input into RAM.");
         option('o', "out", output_filename, "The output filename.");
         option('d', "decompress", decompress, "Decompress the input file rather than compressing it.");
         option("vbyte", vbyte_coding, "Use V-Byte encoding of phrases -- better suits the output for pipelining to other compressors.");

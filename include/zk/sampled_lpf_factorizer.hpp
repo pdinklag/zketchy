@@ -56,24 +56,14 @@ private:
     size_t sampling_;
     size_t fp_window_;
 
-    template<std::unsigned_integral Index>
-    void factorize(std::string_view const& t, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
-        internal::MemoryInputStream in(t.data(), t.length());
-        factorize<decltype(in), Index, true>(in, t, emit_literal, emit_reference);
-    }
-
-    template<typename InputStream, std::unsigned_integral Index>
-    void factorize(InputStream& in, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
-        factorize<decltype(in), Index, false>(in, std::string_view(), emit_literal, emit_reference);
-    }
-
     template<typename InputStream, std::unsigned_integral Index, bool has_text_access>
-    void factorize(InputStream& in, std::string_view const& t, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
+    void factorize(InputStream& in, size_t const block_size, std::string_view const& t, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
         using M = Metachar<Index>;
 
         Index const n = t.size();
         auto const num_threads = omp_get_max_threads();
         Index const num_per_thread = internal::idiv_ceil(n, num_threads);
+        size_t const s = (1ULL << sampling_) - 1;
 
         internal::MemoryTimePhase phase;
 
@@ -89,74 +79,102 @@ private:
                 phase.start();
             }
 
-            std::unique_ptr<std::vector<M>> lpre_parsing[num_threads];
-            {
-                RK rk_trigger(rolling_fp_base_, fp_window_);
-                RK64 rk_meta(rolling_fp_base_);
+            RK rk_trigger(rolling_fp_base_, fp_window_);
+            RK64 rk_meta(rolling_fp_base_);
 
-                size_t const s = (1ULL << sampling_) - 1;
-                size_t const min_metachar_len = s / 2;
+            auto push_trigger = [&](Fingerprint& fp, char const* p){ fp = rk_trigger.push(fp, *p); };
+            auto roll_trigger = [&](Fingerprint& fp, char const* p){ fp = rk_trigger.roll(fp, *(p-fp_window_), *p); };
+            auto push_meta = [&](Fingerprint64& fp, char const* p){ fp = rk_meta.push(fp, *p); };
+
+            size_t const min_metachar_len = s / 2; // at least w!
+            std::vector<std::unique_ptr<std::vector<M>>> pre_parsing;
+
+            if constexpr(has_text_access) {
+                char const* t_beg = t.data();
+
+                for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
+                    pre_parsing.emplace_back(std::make_unique<std::vector<M>>());
+                }
 
                 #pragma omp parallel
                 {
                     Index const thread_num = omp_get_thread_num();
-                    Index const beg = thread_num * num_per_thread;
-                    Index const end = std::min(beg + num_per_thread, n);
 
-                    lpre_parsing[thread_num] = std::make_unique<std::vector<M>>();
-                    auto& local_pre_parsing = *lpre_parsing[thread_num];
+                    auto& local_pre_parsing = *pre_parsing[thread_num];
                     local_pre_parsing.reserve(size_t(1.2 * double(n) / double(s * num_threads))); // exaggerate a little bit to account for standard deviation
+
+                    char const* beg = t_beg + thread_num * num_per_thread;
+                    char const* end = std::min(beg + num_per_thread, t_beg + n);
 
                     Fingerprint fp_trigger = 0;
                     Fingerprint64 fp_meta = 0;
 
                     if(thread_num > 0) {
                         // consider previous characters for consistent triggering
-                        for(Index j = beg - fp_window_; j < beg; j++) {
-                            fp_trigger = rk_trigger.push(fp_trigger, t[j]);
+                        for(char const* p = beg - fp_window_; p < beg; p++) {
+                            push_trigger(fp_trigger, p);
                         }
                     }
 
-                    Index last = beg;
-                    Index i = beg;
+                    char const* last = beg;
+                    char const* p = beg;
 
-                    for(; i < end && i < fp_window_; i++) {
+                    for(; p < end && p < beg + fp_window_; p++) {
                         if(thread_num == 0) {
                             // initialize
-                            fp_trigger = rk_trigger.push(fp_trigger, t[i]);
+                            push_trigger(fp_trigger, p);
                         } else {
                             // roll
-                            fp_trigger = rk_trigger.roll(fp_trigger, t[i - fp_window_], t[i]);
+                            roll_trigger(fp_trigger, p);
                         }
-                        fp_meta = rk_meta.push(fp_meta, t[i]);
+                        push_meta(fp_meta, p);
                     }
 
-                    for(; i < end; i++) {
-                        if(i - last >= min_metachar_len && (fp_trigger & s) == 0) {
-                            local_pre_parsing.push_back(M{ last, MLength(i - last), fp_meta });
-                            last = i;
+                    for(; p < end; p++) {
+                        if(p - last >= min_metachar_len && (fp_trigger & s) == 0) {
+                            local_pre_parsing.push_back(M{ Index(last - t_beg), MLength(p - last), fp_meta });
+                            last = p; // TODO: for a proper prefix-free parsing, subtract fp_window_
                             fp_meta = 0;
                         }
 
-                        fp_trigger = rk_trigger.roll(fp_trigger, t[i - fp_window_], t[i]);
-                        fp_meta = rk_meta.push(fp_meta, t[i]);
+                        roll_trigger(fp_trigger, p);
+                        push_meta(fp_meta, p);
                     }
 
-                    if(last < i) {
-                        local_pre_parsing.push_back(M{ last, MLength(i - last), fp_meta });
+                    if(last < p) {
+                        local_pre_parsing.push_back(M{ Index(last - t_beg), MLength(p - last), fp_meta });
                     }
                 }
+            } else {
+                // TODO: WIP
+                auto block = internal::OverlappingBlocks(in, block_size, fp_window_);
+                do {
+                    if(block.empty()) continue;
+
+                    // prepare parsing
+                    size_t const pre_parsing_offs = pre_parsing.size();
+                    for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
+                        pre_parsing.emplace_back(std::make_unique<std::vector<M>>());
+                    }
+
+                    auto const num_per_thread = internal::idiv_ceil(block.size(), num_threads);
+
+                    // TODO: parallel processing
+
+                    // advance
+                    block.advance();
+                } while(!block.last());
             }
 
-            size_t pre_parsing_size = 0;
-            for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
-                pre_parsing_size += lpre_parsing[thread_num]->size();
+            size_t pre_parsing_length = 0;
+            for(size_t i = 0; i < pre_parsing.size(); i++) {
+                pre_parsing_length += pre_parsing[i]->size();
             }
 
             if constexpr(debug_) {
                 phase.stop();
                 std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
-                std::cout << "\tparsing size: " << pre_parsing_size << std::endl;
+                std::cout << "\tparsing length: " << pre_parsing_length << std::endl;
             }
 
             if constexpr(debug_) {
@@ -167,11 +185,11 @@ private:
 
             std::vector<M> pre_meta;
             size_t meta_len_total = 0;
-            parsing.reserve(pre_parsing_size);
+            parsing.reserve(pre_parsing_length);
             {
                 ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps;
-                for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
-                    for(auto& x : *lpre_parsing[thread_num]) {
+                for(size_t i = 0; i < num_threads; i++) {
+                    for(auto& x : *pre_parsing[i]) {
                         auto const fp = x.fp;
                         auto it = meta_fps.find(fp);
                         if(it != meta_fps.end()) {
@@ -185,7 +203,7 @@ private:
                             meta_len_total += x.len;
                         }
                     }
-                    lpre_parsing[thread_num].reset();
+                    pre_parsing[i].reset();
                 }
             }
 
@@ -409,6 +427,8 @@ private:
                         ++j;
                         while(j < m && rext >= meta[parsing[j]].len) {
                             // TODO: we may have skipped additional metacharacters... but HOW???
+                            // ANSWER: because the "suffix array" may not actually be THE suffix array, because we do not guarantee prefix-freeness of metacharacters
+                            //         however, this does not harm the LZ77 algorithm based on LPF per sé
                             rext -= meta[parsing[j]].len;
                             ++j;
                         }
@@ -487,17 +507,23 @@ public:
         : sampling_(sampling), fp_window_(fp_window) {
     }
 
+    template<typename InputStream, std::unsigned_integral Index>
+    void factorize(InputStream& in, size_t const block_size, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
+        factorize<InputStream, Index, false>(in, block_size, std::string_view(), emit_literal, emit_reference);
+    }
+
     template<std::contiguous_iterator Input>
     requires (sizeof(std::iter_value_t<Input>) == 1)
     void factorize(Input begin, Input const& end, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
         std::string_view const t(begin, end);
         size_t const n = t.size();
 
-        // FIXME: whether or not we need 64 bits should depend on the size of the PARSING, not the input
+        struct NoStream{};   
+        NoStream no_stream;
         if(n < MAX_SIZE_32BIT) {
-            factorize<uint32_t>(t, emit_literal, emit_reference);
+            factorize<NoStream, uint32_t, true>(no_stream, 0, t, emit_literal, emit_reference);
         } else {
-            factorize<uint64_t>(t, emit_literal, emit_reference);
+            factorize<NoStream, uint64_t, true>(no_stream, 0, t, emit_literal, emit_reference);
         }
     }
 
