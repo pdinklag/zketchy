@@ -48,7 +48,6 @@ private:
         Index occ;
         MLength len;
         Fingerprint64 fp;
-        size_t thread_num;
     } __attribute__((packed));
 
     static constexpr Fingerprint rolling_fp_base_ = (1ULL << 16) - 39;
@@ -158,7 +157,7 @@ private:
 
                     for(; last < end && p < t_end; p++) {
                         if((fp_trigger & s) == 0) {
-                            local_pre_parsing.push_back(M{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta, thread_num });
+                            local_pre_parsing.push_back(M{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta });
                             last = p;
                             fp_meta = 0;
                         }
@@ -172,7 +171,7 @@ private:
                         if(block.last()) {
                             // we are in the last block -- introduce final metacharacter
                             // nb: this is safe if not scanning blockwise; block.last() will then always return true
-                            local_pre_parsing.push_back(M{ Index(block.offset() + (last - t_beg)), MLength(t_end - last), fp_meta, thread_num });
+                            local_pre_parsing.push_back(M{ Index(block.offset() + (last - t_beg)), MLength(t_end - last), fp_meta });
                         } else {
                             // leave a memo for the first thread processing the next block
                             prev_block_delta = t_end - last;
