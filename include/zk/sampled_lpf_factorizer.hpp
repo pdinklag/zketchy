@@ -70,6 +70,7 @@ private:
 
         // parsing
         std::vector<M> meta;
+        size_t meta_len_total = 0;
         std::vector<Index> parsing;
         {
             if constexpr(debug_) {
@@ -203,7 +204,7 @@ private:
             }
 
             std::vector<M> pre_meta;
-            size_t meta_len_total = 0;
+            meta_len_total = 0;
             parsing.reserve(pre_parsing_length);
             {
                 ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps;
@@ -253,6 +254,45 @@ private:
                 std::cout << "\taverage length: " << double(meta_len_total) / double(sigma) << " (total: " << meta_len_total << ")" << std::endl;
             }
 
+            // load metacharacters
+            std::unique_ptr<char[]> meta_buf;
+            std::unique_ptr<Index[]> meta_ptr;
+            if constexpr(!has_text_access) {
+                if constexpr(debug_) {
+                    std::cout << "load metacharacters ... ";
+                    std::cout.flush();
+                    phase.start();
+                }
+
+                size_t const meta_bufsize = meta_len_total + fp_window_ * (sigma-1); // nb: account for the fact that we prepend the previous trigger string (except for the first metacharacter)
+                meta_buf = std::make_unique<char[]>(meta_bufsize);
+                meta_ptr = std::make_unique<Index[]>(sigma);
+
+                char* p = meta_buf.get();
+
+                // load first metacharacter
+                in.seekg(0, std::ios_base::beg);
+                in.read(p, pre_meta.front().len);
+                meta_ptr[0] = 0;
+                p += pre_meta.front().len;
+
+                // load remaining metacharacters
+                for(size_t i = 1; i < sigma; i++) {
+                    meta_ptr[i] = Index(p - meta_buf.get());
+                    in.seekg(pre_meta[i].occ - fp_window_, std::ios_base::beg);
+
+                    auto const len = pre_meta[i].len + fp_window_;
+                    in.read(p, len);
+                    p += len;
+                }
+
+                if constexpr(debug_) {
+                    phase.stop();
+                    std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
+                    std::cout << "\tsize=" << meta_bufsize << std::endl;
+                }
+            }
+
             // sort meta characters
             if constexpr(debug_) {
                 std::cout << "sort metacharacters ... ";
@@ -263,17 +303,32 @@ private:
             auto meta_order = std::make_unique<MIndex[]>(sigma);
             {
                 std::iota(meta_order.get(), meta_order.get() + sigma, 0);
-                std::sort(std::execution::par_unseq, meta_order.get(), meta_order.get() + sigma, [&](MIndex const a, MIndex const b){
-                    auto const la = pre_meta[a].len + fp_window_;
-                    size_t pa = pre_meta[a].occ;
-                    if(pa) pa -= fp_window_;
 
-                    auto const lb = pre_meta[a].len + fp_window_;
-                    size_t pb = pre_meta[b].occ;
-                    if(pb) pb -= fp_window_;
+                if constexpr(has_text_access) {
+                    // sort by accessing the buffer
+                    std::sort(std::execution::par_unseq, meta_order.get(), meta_order.get() + sigma, [&](MIndex const a, MIndex const b){
+                        auto const la = pre_meta[a].len + fp_window_;
+                        size_t pa = pre_meta[a].occ;
+                        if(pa) pa -= fp_window_;
 
-                    return std::string_view(t.data() + pa, la).compare(std::string_view(t.data() + pb, lb)) < 0;
-                });
+                        auto const lb = pre_meta[a].len + fp_window_;
+                        size_t pb = pre_meta[b].occ;
+                        if(pb) pb -= fp_window_;
+
+                        return std::string_view(t.data() + pa, la).compare(std::string_view(t.data() + pb, lb)) < 0;
+                    });
+                } else {
+                    // sort by accessing the text
+                    std::sort(std::execution::par_unseq, meta_order.get(), meta_order.get() + sigma, [&](MIndex const a, MIndex const b){
+                        auto const la = pre_meta[a].len + (a > 0) * fp_window_;
+                        char const* pa = meta_buf.get() + meta_ptr[a];
+
+                        auto const lb = pre_meta[b].len + (b > 0) * fp_window_;
+                        char const* pb = meta_buf.get() + meta_ptr[b];
+
+                        return std::string_view(pa, la).compare(std::string_view(pb, lb)) < 0;
+                    });
+                }
             }
 
             if constexpr(debug_) {
