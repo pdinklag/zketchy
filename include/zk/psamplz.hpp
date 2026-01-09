@@ -189,8 +189,6 @@ private:
                     in.seekg(0, std::ios_base::beg);
                     block.init(in);
                     do {
-                        if(block.empty()) continue;
-
                         auto const num_per_thread = internal::idiv_ceil(block.size(), num_threads);
 
                         #pragma omp parallel
@@ -216,10 +214,7 @@ private:
                                 }
                             }
                         }
-
-                        // advance
-                        block.advance();
-                    } while(!block.last());
+                    } while(block.advance());
                 }
 
                 phase_sample.data()["num_fingerprints_approx"] = growt_map.get_handle().element_count_approx();
@@ -255,8 +250,6 @@ private:
                     in.seekg(0, std::ios_base::beg);
                     block.init(in);
                     do {
-                        if(block.empty()) continue;
-
                         auto const num_per_thread = internal::idiv_ceil(block.size(), num_threads);
                         #pragma omp parallel
                         {
@@ -306,10 +299,7 @@ private:
                                 }
                             }
                         }
-
-                        // advance
-                        block.advance();
-                    } while(!block.last());
+                    } while(block.advance());
                 }
 
                 phase_parse.stop();

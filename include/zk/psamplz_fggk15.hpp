@@ -227,8 +227,6 @@ private:
 
                 block.init(in);
                 do {
-                    if(block.empty()) continue;
-
                     auto const num_per_thread = internal::idiv_ceil(block.size(), num_threads);
                     #pragma omp parallel
                     {
@@ -260,10 +258,7 @@ private:
                             }
                         }
                     }
-
-                    // advance
-                    block.advance();
-                } while(!block.last());
+                } while(block.advance());
 
                 phase.stop();
                 std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << " ms" << std::endl;

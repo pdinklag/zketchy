@@ -12,11 +12,13 @@ template<typename InputStream>
 class OverlappingBlocks {
 private:
     using Char = typename InputStream::char_type;
+    static constexpr auto EOF_TOKEN = std::char_traits<Char>::eof();
 
     size_t block_size_;
     size_t overlap_;
 
     std::unique_ptr<Char[]> buffer_;
+    InputStream::int_type probe_;
     size_t cur_size_;
     size_t cur_offs_;
     Char* cur_begin_;
@@ -24,17 +26,25 @@ private:
     InputStream* stream_;
 
     void read_next() {
-        stream_->read(cur_begin_, block_size_);
-        cur_size_ = stream_->gcount();
+        if(first()) {
+            stream_->read(cur_begin_, block_size_);
+            cur_size_ = stream_->gcount();
+        } else {
+            *cur_begin_ = Char(probe_);
+            stream_->read(cur_begin_ + 1, block_size_ - 1);
+            cur_size_ = stream_->gcount() + 1;
+        }
+        probe_ = stream_->get();
     }
 
 public:
-    OverlappingBlocks() : block_size_(0), overlap_(0), buffer_(), cur_begin_(nullptr), cur_size_(0), cur_offs_(0), stream_(nullptr) {
+    OverlappingBlocks() : block_size_(0), overlap_(0), buffer_(), probe_(EOF_TOKEN), cur_begin_(nullptr), cur_size_(0), cur_offs_(0), stream_(nullptr) {
     }
 
     OverlappingBlocks(size_t const block_size, size_t const overlap) : block_size_(block_size),
         overlap_(overlap),
         buffer_(std::make_unique<Char[]>(block_size_ + overlap_)),
+        probe_(EOF_TOKEN),
         cur_begin_(buffer_.get() + overlap_),
         cur_size_(block_size_ + overlap_),
         cur_offs_(0),
@@ -66,7 +76,9 @@ public:
     }
 
     // advance to the next block
-    void advance() {
+    bool advance() {
+        if(last()) return false;
+
         // slide overlap, then read next
         for(ssize_t i = 0; i < ssize_t(overlap_); i++) {
             buffer_[i] = cur_begin_[ssize_t(cur_size_) - ssize_t(overlap_) + i];
@@ -74,6 +86,7 @@ public:
 
         cur_offs_ += cur_size_;
         read_next();
+        return cur_size_ > 0;
     }
 
     inline Char operator[](ssize_t const i) const{ return cur_begin_[i]; }
@@ -84,7 +97,8 @@ public:
     inline size_t offset() const { return cur_offs_; }
 
     inline bool empty() const { return cur_size_ == 0; }
-    inline bool last() const { return cur_size_ < block_size_; }
+    inline bool first() const { return cur_offs_ == 0; }
+    inline bool last() const { return probe_ == EOF_TOKEN; }
 
     Char* buffer() const { return buffer_.get(); }
 };
