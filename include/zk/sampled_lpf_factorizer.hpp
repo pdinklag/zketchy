@@ -525,7 +525,7 @@ private:
                             }
                         }
                         // ... and to the left
-                        // FIXME: EEEEEEEK /o\
+                        // FIXME: EEEEEEEK ...
                         if(meta_src > 0)[[likely]] {
                             size_t x = meta_dst - 1;
                             size_t y = meta_src - 1;
