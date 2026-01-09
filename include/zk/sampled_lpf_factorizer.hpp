@@ -502,23 +502,47 @@ private:
                         };
 
                         // ... to the right
-                        size_t x = meta_dst + matched_meta;
-                        size_t y = meta_src + matched_meta;
-                        if(x < m)[[likely]] {
-                            char const *px, *xend, *py, *yend;
-                            get_meta_str(x, px, xend);
-                            get_meta_str(y, py, yend);
-                            while(*px == *py) {
-                                ++rext;
+                        {
+                            size_t x = meta_dst + matched_meta;
+                            size_t y = meta_src + matched_meta;
+                            if(x < m)[[likely]] {
+                                char const *px, *xend, *py, *yend;
+                                get_meta_str(x, px, xend);
+                                get_meta_str(y, py, yend);
+                                while(*px == *py) {
+                                    ++rext;
 
-                                if(++px >= xend) {
-                                    if(++x >= m) break;
-                                    get_meta_str(x, px, xend);
+                                    if(++px >= xend) {
+                                        if(++x >= m) break;
+                                        get_meta_str(x, px, xend);
+                                    }
+
+                                    if(++py >= yend) {
+                                        ++y;
+                                        get_meta_str(y, py, yend);
+                                    }
+                                }
+                            }
+                        }
+                        // ... and to the left
+                        // FIXME: EEEEEEEK /o\
+                        if(meta_src > 0)[[likely]] {
+                            size_t x = meta_dst - 1;
+                            size_t y = meta_src - 1;
+                            char const *px, *xbeg, *py, *ybeg;
+                            get_meta_str(x, xbeg, px); --px;
+                            get_meta_str(y, ybeg, py); --py;
+                            while(*px == *py) {
+                                ++lext;
+
+                                if(--py <= ybeg) {
+                                    if(y-- == 0) break; // nb: important to post-decrement here
+                                    get_meta_str(y, ybeg, py); --py;
                                 }
 
-                                if(++py >= yend) {
-                                    ++y;
-                                    get_meta_str(y, py, yend);
+                                if(--px <= xbeg) {
+                                    --x;
+                                    get_meta_str(x, xbeg, px); --px;
                                 }
                             }
                         }
