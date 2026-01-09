@@ -63,7 +63,6 @@ private:
 
         Index const n = t.size();
         auto const num_threads = omp_get_max_threads();
-        Index const num_per_thread = internal::idiv_ceil(n, num_threads);
         size_t const s = (1ULL << sampling_) - 1;
 
         internal::MemoryTimePhase phase;
@@ -89,7 +88,24 @@ private:
 
             std::vector<std::unique_ptr<std::vector<M>>> pre_parsing;
 
+            internal::OverlappingBlocks<InputStream> block;
+            bool done;
             if constexpr(has_text_access) {
+                // we only scan one "block" - the whole input
+                done = true;
+            } else {
+                // we will process the input blockwise
+                block = internal::OverlappingBlocks(in, block_size, fp_window_);
+            }
+
+            // when the last thread reaches the end of a block (not the last) and has not yet found a trigger string,
+            // it leaves this delta for the first thread processing the next block
+            Index prev_block_delta;
+            do {
+                size_t const pre_parsing_offs = pre_parsing.size();
+                Index const num_per_thread = internal::idiv_ceil(has_text_access ? n : block.size(), num_threads);
+
+                // add p partial parsings for each block
                 for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
                     pre_parsing.emplace_back(std::make_unique<std::vector<M>>());
                 }
@@ -98,11 +114,17 @@ private:
                 {
                     Index const thread_num = omp_get_thread_num();
 
-                    auto& local_pre_parsing = *pre_parsing[thread_num];
-                    local_pre_parsing.reserve(size_t(1.2 * double(n) / double(s * num_threads))); // exaggerate a little bit to account for standard deviation
+                    auto& local_pre_parsing = *pre_parsing[pre_parsing_offs + thread_num];
+                    local_pre_parsing.reserve(size_t(1.2 * double(has_text_access ? n : block.size()) / double(s * num_threads))); // exaggerate a little bit to account for standard deviation
 
-                    char const* t_beg = t.data();
-                    char const* t_end = t_beg + n;
+                    char const* t_beg, *t_end;
+                    if constexpr(has_text_access) {
+                        t_beg = t.data();
+                        t_end = t_beg + n;
+                    } else {
+                        t_beg = block.begin();
+                        t_end = block.end();
+                    }
 
                     char const* beg = t_beg + thread_num * num_per_thread;
                     char const* end = std::min(beg + num_per_thread, t_end);
@@ -110,18 +132,24 @@ private:
                     Fingerprint fp_trigger = 0;
                     Fingerprint64 fp_meta = 0;
 
-                    if(thread_num > 0) {
+                    if(thread_num > 0 || !block.first()) {
                         // consider previous characters for consistent triggering
+                        // (when scanning blockwise, the first thread must do this too unless this is the first block)
                         for(char const* p = beg - fp_window_; p < beg; p++) {
                             push_trigger(fp_trigger, p);
                         }
                     }
 
                     char const* last = beg;
+                    if(thread_num == 0 && !block.first()) {
+                        // if this is not the first block, the first thread must use whatever memo the last thread left from the previous block
+                        last -= prev_block_delta;
+                    }
+
                     char const* p = beg;
 
-                    // the first thread must fingerprint the initial window
-                    if(thread_num == 0) {
+                    // the first thread must fingerprint the initial window if this is the first block
+                    if(thread_num == 0 && block.first()) {
                         for(; p < end && p < beg + fp_window_; p++) {
                             push_trigger(fp_trigger, p);
                             push_meta(fp_meta, p);
@@ -130,7 +158,7 @@ private:
 
                     for(; last < end && p < t_end; p++) {
                         if((fp_trigger & s) == 0) {
-                            local_pre_parsing.push_back(M{ Index(last - t_beg), MLength(p - last), fp_meta, thread_num });
+                            local_pre_parsing.push_back(M{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta, thread_num });
                             last = p;
                             fp_meta = 0;
                         }
@@ -139,31 +167,24 @@ private:
                         push_meta(fp_meta, p);
                     }
 
-                    // the last thread MUST introduce the final metacharacter!
+                    // the last thread must either introduce the final metacharacter, or leave information for the first thread regarding the next block
                     if(thread_num == num_threads - 1 && last < t_end) {
-                        local_pre_parsing.push_back(M{ Index(last - t_beg), MLength(t_end - last), fp_meta, thread_num });
+                        if(block.last()) {
+                            // we are in the last block -- introduce final metacharacter
+                            // nb: this is safe if not scanning blockwise; block.last() will then always return true
+                            local_pre_parsing.push_back(M{ Index(block.offset() + (last - t_beg)), MLength(t_end - last), fp_meta, thread_num });
+                        } else {
+                            // leave a memo for the first thread processing the next block
+                            prev_block_delta = t_end - last;
+                        }
                     }
                 }
-            } else {
-                // TODO: WIP
-                auto block = internal::OverlappingBlocks(in, block_size, fp_window_);
-                do {
-                    if(block.empty()) continue;
 
-                    // prepare parsing
-                    size_t const pre_parsing_offs = pre_parsing.size();
-                    for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
-                        pre_parsing.emplace_back(std::make_unique<std::vector<M>>());
-                    }
-
-                    auto const num_per_thread = internal::idiv_ceil(block.size(), num_threads);
-
-                    // TODO: parallel processing
-
-                    // advance
-                    block.advance();
-                } while(!block.last());
-            }
+                if constexpr(!has_text_access) {
+                    // advance to next block
+                    done = !block.advance();
+                }
+            } while(!done);
 
             size_t pre_parsing_length = 0;
             for(size_t i = 0; i < pre_parsing.size(); i++) {
@@ -173,7 +194,7 @@ private:
             if constexpr(debug_) {
                 phase.stop();
                 std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
-                std::cout << "\tparsing length: " << pre_parsing_length << std::endl;
+                std::cout << "\tpreliminary parsing length: " << pre_parsing_length << std::endl;
             }
 
             if constexpr(debug_) {
@@ -189,8 +210,9 @@ private:
                 ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps;
                 size_t pos = 0;
                 size_t skipped = 0;
-                for(size_t i = 0; i < num_threads; i++) {
-                    for(auto const& x : *pre_parsing[i]) {
+                for(size_t i = 0; i < pre_parsing.size(); i++) {
+                    for(size_t j = 0; j < pre_parsing[i]->size(); j++) {
+                        auto const& x = (*pre_parsing[i])[j];
                         if(x.occ < pos) {
                             // a thread may have parsed beyond its block boundary to the next trigger string
                             ++skipped;
@@ -213,7 +235,7 @@ private:
 
                         pos += x.len;
                     }
-                    pre_parsing[i].reset();
+                    // pre_parsing[i].reset();
                 }
                 std::cout << "(skipped=" << skipped << ", final pos=" << pos << ") ";
             }
@@ -289,6 +311,7 @@ private:
             if constexpr(debug_) {
                 phase.stop();
                 std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
+                std::cout << "\tparsing length: " << parsing.size() << std::endl;
             }
         }
 
@@ -535,7 +558,11 @@ public:
         std::string_view const t(begin, end);
         size_t const n = t.size();
 
-        struct NoStream{};   
+        struct NoStream {
+            // define types for overlapping blocks to compile
+            using char_type = char;
+            using int_type = int;
+        };
         NoStream no_stream;
         if(n < MAX_SIZE_32BIT) {
             factorize<NoStream, uint32_t, true>(no_stream, 0, t, emit_literal, emit_reference);

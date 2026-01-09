@@ -8,8 +8,11 @@ namespace zk::internal {
 class MemoryInputStream {
 public:
     using char_type = char;
+    using int_type = int;
 
 private:
+    static constexpr auto EOF_TOKEN = std::char_traits<char_type>::eof();
+
     char const* data_;
     size_t const size_;
 
@@ -49,11 +52,21 @@ public:
 
     inline MemoryInputStream& read(char* outp, size_t const num) {
         gcount_ = std::min(num, size_ - pos_);
-
-        std::memcpy(outp, data_ + pos_, gcount_);
-        pos_ += gcount_;
-
+        if(gcount_ > 0) {
+            std::memcpy(outp, data_ + pos_, gcount_);
+            pos_ += gcount_;
+        }
         return *this;
+    }
+
+    inline int_type get() {
+        if(pos_ < size_) {
+            gcount_ = 1;
+            return data_[pos_++];
+        } else {
+            gcount_ = 0;
+            return EOF_TOKEN;
+        }
     }
 
     inline size_t gcount() const { return gcount_; }
