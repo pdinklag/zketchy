@@ -70,8 +70,10 @@ private:
 
         // parsing
         std::vector<M> meta;
-        size_t meta_len_total = 0;
+        std::unique_ptr<char[]> meta_buf;
+        std::unique_ptr<Index[]> meta_ptr;
         std::vector<Index> parsing;
+
         {
             if constexpr(debug_) {
                 std::cout << "parallel pre-parse ... ";
@@ -204,7 +206,7 @@ private:
             }
 
             std::vector<M> pre_meta;
-            meta_len_total = 0;
+            size_t meta_len_total = 0;
             parsing.reserve(pre_parsing_length);
             {
                 ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps;
@@ -255,8 +257,6 @@ private:
             }
 
             // load metacharacters
-            std::unique_ptr<char[]> meta_buf;
-            std::unique_ptr<Index[]> meta_ptr;
             if constexpr(!has_text_access) {
                 if constexpr(debug_) {
                     std::cout << "load metacharacters ... ";
@@ -305,7 +305,7 @@ private:
                 std::iota(meta_order.get(), meta_order.get() + sigma, 0);
 
                 if constexpr(has_text_access) {
-                    // sort by accessing the buffer
+                    // sort by accessing the text
                     std::sort(std::execution::par_unseq, meta_order.get(), meta_order.get() + sigma, [&](MIndex const a, MIndex const b){
                         auto const la = pre_meta[a].len + fp_window_;
                         size_t pa = pre_meta[a].occ;
@@ -318,7 +318,7 @@ private:
                         return std::string_view(t.data() + pa, la).compare(std::string_view(t.data() + pb, lb)) < 0;
                     });
                 } else {
-                    // sort by accessing the text
+                    // sort by accessing the buffer
                     std::sort(std::execution::par_unseq, meta_order.get(), meta_order.get() + sigma, [&](MIndex const a, MIndex const b){
                         auto const la = pre_meta[a].len + (a > 0) * fp_window_;
                         char const* pa = meta_buf.get() + meta_ptr[a];
@@ -357,9 +357,21 @@ private:
             }
 
             // rewrite meta
+            // if we are streaming, we also need to rewrite the pointers into the dictionary
             meta.reserve(sigma);
+
+            std::unique_ptr<Index[]> new_meta_ptr;
+            if constexpr(!has_text_access) {
+                new_meta_ptr = std::make_unique<Index[]>(sigma);
+            }
+            
             for(size_t i = 0; i < sigma; i++) {
                 meta.push_back(pre_meta[meta_order[i]]);
+                if constexpr(!has_text_access) new_meta_ptr[i] = meta_ptr[meta_order[i]];
+            }
+
+            if constexpr(!has_text_access) {
+                meta_ptr = std::move(new_meta_ptr);
             }
 
             if constexpr(debug_) {
@@ -461,22 +473,54 @@ private:
                 lext = 0;
 
                 if(matched_meta >= 1) {
-                    // ... to the right
-                    {
-                        size_t const x = parsing_beg[meta_dst] + l;
-                        size_t const y = parsing_beg[meta_src] + l;
-                        while(x + rext < n && y + rext < n && t[x + rext] == t[y + rext]) {
-                            ++rext;
+                    if constexpr(has_text_access) {
+                        // ... by accessing the text ...
+                        // ... to the right
+                        {
+                            size_t const x = parsing_beg[meta_dst] + l;
+                            size_t const y = parsing_beg[meta_src] + l;
+                            while(x + rext < n && t[x + rext] == t[y + rext]) {
+                                ++rext;
+                            }
                         }
-                    }
-                    // ... and to the left
-                    {
-                        size_t x = parsing_beg[meta_dst];
-                        size_t y = parsing_beg[meta_src];
-                        while(y > 0 && t[x-1] == t[y-1]) {
-                            --x;
-                            --y;
-                            ++lext;
+                        // ... and to the left
+                        {
+                            size_t x = parsing_beg[meta_dst];
+                            size_t y = parsing_beg[meta_src];
+                            while(y > 0 && t[x-1] == t[y-1]) {
+                                --x;
+                                --y;
+                                ++lext;
+                            }
+                        }
+                    } else {
+                        // ... by accessing the buffer ...
+                        auto get_meta_str = [&](size_t const i, char const*& begin, char const*& end){
+                            auto const x = parsing[i];
+                            begin = meta_buf.get() + meta_ptr[x] + (x > 0) * fp_window_;
+                            end = meta_buf.get() + meta_ptr[x] + meta[x].len + (x > 0) * fp_window_;
+                        };
+
+                        // ... to the right
+                        size_t x = meta_dst + matched_meta;
+                        size_t y = meta_src + matched_meta;
+                        if(x < m)[[likely]] {
+                            char const *px, *xend, *py, *yend;
+                            get_meta_str(x, px, xend);
+                            get_meta_str(y, py, yend);
+                            while(*px == *py) {
+                                ++rext;
+
+                                if(++px >= xend) {
+                                    if(++x >= m) break;
+                                    get_meta_str(x, px, xend);
+                                }
+
+                                if(++py >= yend) {
+                                    ++y;
+                                    get_meta_str(y, py, yend);
+                                }
+                            }
                         }
                     }
                 }
