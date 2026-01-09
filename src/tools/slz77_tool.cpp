@@ -40,7 +40,7 @@ private:
     bool count_only = false;
     bool vbyte_coding = false;
 
-    static size_t factorize(zk::SampledLPFFactorizer& factorizer, std::string const& s) {
+    size_t factorize(zk::SampledLPFFactorizer& factorizer, std::string const& s) {
         size_t z = 0;
         factorizer.factorize(s.begin(), s.end(),
             [&](lz77::Factor literal){
@@ -52,35 +52,65 @@ private:
         return z;
     }
 
-    static size_t factorize_vbyte(zk::SampledLPFFactorizer& factorizer, std::string const& s, iopp::FileOutputStream& out) {
+    size_t factorize_vbyte(zk::SampledLPFFactorizer& factorizer, std::string const& s, iopp::FileOutputStream& out) {
         size_t z = 0;
-        factorizer.factorize(s.begin(), s.end(),
-            [&](lz77::Factor literal){
-                zk::internal::encode_vbyte(out, 0);
-                out.put(literal.literal());
-                ++z;
-            },
-            [&](lz77::Factor ref){
-                zk::internal::encode_vbyte(out, ref.len);
-                zk::internal::encode_vbyte(out, ref.src);
-                ++z;
-            });
+        if(window > 0) {
+            std::cout << ">>> DISCLAIMER: testing streaming version -- text is still loaded fully in RAM <<<" << std::endl;
+            factorizer.factorize_debug_streaming(s.begin(), s.end(), window,
+                [&](lz77::Factor literal){
+                    zk::internal::encode_vbyte(out, 0);
+                    out.put(literal.literal());
+                    ++z;
+                },
+                [&](lz77::Factor ref){
+                    zk::internal::encode_vbyte(out, ref.len);
+                    zk::internal::encode_vbyte(out, ref.src);
+                    ++z;
+                });
+        } else {
+            factorizer.factorize(s.begin(), s.end(),
+                [&](lz77::Factor literal){
+                    zk::internal::encode_vbyte(out, 0);
+                    out.put(literal.literal());
+                    ++z;
+                },
+                [&](lz77::Factor ref){
+                    zk::internal::encode_vbyte(out, ref.len);
+                    zk::internal::encode_vbyte(out, ref.src);
+                    ++z;
+                });
+        }
         return z;
     }
 
-    static size_t factorize_block_enc(zk::SampledLPFFactorizer& factorizer, std::string const& s, auto& enc) {
+    size_t factorize_block_enc(zk::SampledLPFFactorizer& factorizer, std::string const& s, auto& enc) {
         size_t z = 0;
-        factorizer.factorize(s.begin(), s.end(),
-            [&](lz77::Factor literal){
-                enc.write_uint(TOK_REF_LEN, 0);
-                enc.write_char(TOK_LITERAL, literal.literal());
-                ++z;
-            },
-            [&](lz77::Factor ref){
-                enc.write_uint(TOK_REF_LEN, ref.len);
-                enc.write_uint(TOK_REF_SRC, ref.src);
-                ++z;
-            });
+        if(window > 0) {
+            std::cout << ">>> DISCLAIMER: testing streaming version -- text is still loaded fully in RAM <<<" << std::endl;
+            factorizer.factorize_debug_streaming(s.begin(), s.end(), window,
+                [&](lz77::Factor literal){
+                    enc.write_uint(TOK_REF_LEN, 0);
+                    enc.write_char(TOK_LITERAL, literal.literal());
+                    ++z;
+                },
+                [&](lz77::Factor ref){
+                    enc.write_uint(TOK_REF_LEN, ref.len);
+                    enc.write_uint(TOK_REF_SRC, ref.src);
+                    ++z;
+                });
+        } else {
+            factorizer.factorize(s.begin(), s.end(),
+                [&](lz77::Factor literal){
+                    enc.write_uint(TOK_REF_LEN, 0);
+                    enc.write_char(TOK_LITERAL, literal.literal());
+                    ++z;
+                },
+                [&](lz77::Factor ref){
+                    enc.write_uint(TOK_REF_LEN, ref.len);
+                    enc.write_uint(TOK_REF_SRC, ref.src);
+                    ++z;
+                });
+        }
         return z;
     }
 

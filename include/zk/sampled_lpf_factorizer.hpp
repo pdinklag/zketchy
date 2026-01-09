@@ -570,6 +570,20 @@ public:
         }
     }
 
+    template<std::contiguous_iterator Input>
+    requires (sizeof(std::iter_value_t<Input>) == 1)
+    void factorize_debug_streaming(Input begin, Input const& end, size_t const block_size, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
+        std::string_view const t(begin, end);
+        size_t const n = t.size();
+
+        internal::MemoryInputStream in(t.data(), t.size());
+        if(n < MAX_SIZE_32BIT) {
+            factorize<decltype(in), uint32_t, false>(in, block_size, t, emit_literal, emit_reference);
+        } else {
+            factorize<decltype(in), uint64_t, false>(in, block_size, t, emit_literal, emit_reference);
+        }
+    }
+
     template<std::contiguous_iterator Input, std::output_iterator<lz77::Factor> Output>
     requires (sizeof(std::iter_value_t<Input>) == 1)
     void factorize(Input begin, Input const& end, Output out) {
