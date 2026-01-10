@@ -161,8 +161,12 @@ private:
                     for(; last < end && p < t_end; p++) {
                         if((fp_trigger & s) == 0) {
                             local_pre_parsing.push_back(M{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta });
-                            last = p;
+                            last = p - fp_window_;
+
                             fp_meta = 0;
+                            for(char const* q = p - fp_window_; q < p; q++) {
+                                push_meta(fp_meta, q);
+                            }
                         }
 
                         roll_trigger(fp_trigger, p);
@@ -235,7 +239,7 @@ private:
                             meta_len_total += x.len;
                         }
 
-                        pos += x.len;
+                        pos += x.len - fp_window_;
                     }
                     // pre_parsing[i].reset();
                 }
@@ -307,13 +311,11 @@ private:
                 if constexpr(has_text_access) {
                     // sort by accessing the text
                     std::sort(std::execution::par_unseq, meta_order.get(), meta_order.get() + sigma, [&](MIndex const a, MIndex const b){
-                        auto const la = pre_meta[a].len + fp_window_;
+                        auto const la = pre_meta[a].len;
                         size_t pa = pre_meta[a].occ;
-                        if(pa) pa -= fp_window_;
 
-                        auto const lb = pre_meta[a].len + fp_window_;
+                        auto const lb = pre_meta[a].len;
                         size_t pb = pre_meta[b].occ;
-                        if(pb) pb -= fp_window_;
 
                         return std::string_view(t.data() + pa, la).compare(std::string_view(t.data() + pb, lb)) < 0;
                     });
@@ -390,7 +392,7 @@ private:
             size_t i = 0;
             for(size_t j = 0; j < m; j++) {
                 parsing_beg[j] = i;
-                i += meta[parsing[j]].len;
+                i += meta[parsing[j]].len - fp_window_; // nb: account for overlap
             }
         }
 
@@ -463,7 +465,7 @@ private:
 
                 // first compare meta characters
                 matched_meta = 0;
-                while(meta_dst + matched_meta < m && meta_src + matched_meta < m && parsing[meta_dst + matched_meta] == parsing[meta_src + matched_meta]) {
+                while(meta_dst + matched_meta < m && parsing[meta_dst + matched_meta] == parsing[meta_src + matched_meta]) {
                     l += meta[parsing[meta_dst + matched_meta]].len;
                     ++matched_meta;
                 }
@@ -473,6 +475,8 @@ private:
                 lext = 0;
 
                 if(matched_meta >= 1) {
+                    l -= (matched_meta - 1) * fp_window_; // we have to account for matched_meta-1 overlaps in the phrase
+
                     if constexpr(has_text_access) {
                         // ... by accessing the text ...
                         // ... to the right
@@ -585,7 +589,7 @@ private:
                     // emit reference
                     lrefs[thread_num]->emplace_back(dst, src, lcp);
 
-                    j += matched_meta - 1;
+                    j += matched_meta - 1; // nb: -1 because the for loop will already advance by one
                     if(rext > 0) {
                         // we have encoded characters from the following meta characters
                         ++j;
