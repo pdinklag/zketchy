@@ -283,9 +283,9 @@ private:
                 // load remaining metacharacters
                 for(size_t i = 1; i < sigma; i++) {
                     meta_ptr[i] = Index(p - meta_buf.get());
-                    in.seekg(pre_meta[i].occ - fp_window_, std::ios_base::beg);
+                    in.seekg(pre_meta[i].occ, std::ios_base::beg);
 
-                    auto const len = pre_meta[i].len + fp_window_;
+                    auto const len = pre_meta[i].len;
                     in.read(p, len);
                     p += len;
                 }
@@ -322,10 +322,10 @@ private:
                 } else {
                     // sort by accessing the buffer
                     std::sort(std::execution::par_unseq, meta_order.get(), meta_order.get() + sigma, [&](MIndex const a, MIndex const b){
-                        auto const la = pre_meta[a].len + (a > 0) * fp_window_;
+                        auto const la = pre_meta[a].len;
                         char const* pa = meta_buf.get() + meta_ptr[a];
 
-                        auto const lb = pre_meta[b].len + (b > 0) * fp_window_;
+                        auto const lb = pre_meta[b].len;
                         char const* pb = meta_buf.get() + meta_ptr[b];
 
                         return std::string_view(pa, la).compare(std::string_view(pb, lb)) < 0;
@@ -501,8 +501,8 @@ private:
                         // ... by accessing the buffer ...
                         auto get_meta_str = [&](size_t const i, char const*& begin, char const*& end){
                             auto const x = parsing[i];
-                            begin = meta_buf.get() + meta_ptr[x] + (x > 0) * fp_window_;
-                            end = meta_buf.get() + meta_ptr[x] + meta[x].len + (x > 0) * fp_window_;
+                            begin = meta_buf.get() + meta_ptr[x];
+                            end = meta_buf.get() + meta_ptr[x] + meta[x].len;
                         };
 
                         // ... to the right
@@ -511,42 +511,39 @@ private:
                             size_t y = meta_src + matched_meta;
                             if(x < m)[[likely]] {
                                 char const *px, *xend, *py, *yend;
-                                get_meta_str(x, px, xend);
-                                get_meta_str(y, py, yend);
+                                get_meta_str(x, px, xend); px += fp_window_;
+                                get_meta_str(y, py, yend); py += fp_window_;
                                 while(*px == *py) {
                                     ++rext;
 
                                     if(++px >= xend) {
                                         if(++x >= m) break;
-                                        get_meta_str(x, px, xend);
+                                        get_meta_str(x, px, xend); px += fp_window_;
                                     }
 
                                     if(++py >= yend) {
-                                        ++y;
-                                        get_meta_str(y, py, yend);
+                                        get_meta_str(++y, py, yend); py += fp_window_;
                                     }
                                 }
                             }
                         }
                         // ... and to the left
-                        // FIXME: EEEEEEEK ...
                         if(meta_src > 0)[[likely]] {
                             size_t x = meta_dst - 1;
                             size_t y = meta_src - 1;
                             char const *px, *xbeg, *py, *ybeg;
-                            get_meta_str(x, xbeg, px); --px;
-                            get_meta_str(y, ybeg, py); --py;
+                            get_meta_str(x, xbeg, px); px -= fp_window_ + 1;
+                            get_meta_str(y, ybeg, py); py -= fp_window_ + 1;
                             while(*px == *py) {
                                 ++lext;
 
-                                if(--py <= ybeg) {
+                                if(--py < ybeg) {
                                     if(y-- == 0) break; // nb: important to post-decrement here
-                                    get_meta_str(y, ybeg, py); --py;
+                                    get_meta_str(y, ybeg, py); py -= fp_window_ + 1;
                                 }
 
-                                if(--px <= xbeg) {
-                                    --x;
-                                    get_meta_str(x, xbeg, px); --px;
+                                if(--px < xbeg) {
+                                    get_meta_str(--x, xbeg, px); px -= fp_window_ + 1;
                                 }
                             }
                         }
