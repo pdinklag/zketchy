@@ -2,7 +2,11 @@ add_subdirectory(cmdline)
 add_subdirectory(code)
 add_subdirectory(fp)
 add_subdirectory(iopp)
+
+option(LIBSAIS_USE_OPENMP "Use OpenMP for parallelization" ON)
 add_subdirectory(lz77)
+target_compile_definitions(lz77 PUBLIC "LIBSAIS_OPENMP")
+
 add_subdirectory(pm)
 add_subdirectory(word-packing)
 

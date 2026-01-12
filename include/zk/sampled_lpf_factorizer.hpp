@@ -402,9 +402,9 @@ private:
         auto const sa_extra_space = 6 * sigma; // recommended for libsais
         auto sa = std::make_unique<Index[]>(m + sa_extra_space);
         if constexpr(std::numeric_limits<Index>::digits > 32) {
-            libsais64_long((int64_t*)parsing.data(), (int64_t*)sa.get(), m, sigma, sa_extra_space);
+            libsais64_long_omp((int64_t*)parsing.data(), (int64_t*)sa.get(), m, sigma, sa_extra_space, num_threads);
         } else {
-            libsais_int((int32_t*)parsing.data(), (int32_t*)sa.get(), m, sigma, sa_extra_space);
+            libsais_int_omp((int32_t*)parsing.data(), (int32_t*)sa.get(), m, sigma, sa_extra_space, num_threads);
         }
 
         if constexpr(debug_) {
@@ -421,6 +421,7 @@ private:
 
         auto isa = std::make_unique<Index[]>(m);
         {
+            #pragma omp parallel for
             for(size_t i = 0; i < m; i++) {
                 isa[sa[i]] = i;
             }
