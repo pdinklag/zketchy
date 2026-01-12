@@ -13,6 +13,8 @@
 
 class SLZ77Tool : public cmdline::Program {
 private:
+    static constexpr size_t MAX_SIZE_32BIT = 1ULL << 31 - 1;
+
     static constexpr char const* MAGIC = "SZ77";
     static constexpr size_t MAGIC_LEN = 4;
 
@@ -40,78 +42,109 @@ private:
     bool count_only = false;
     bool vbyte_coding = false;
 
-    size_t factorize(zk::SampledLPFFactorizer& factorizer, std::string const& s) {
-        size_t z = 0;
-        factorizer.factorize(s.begin(), s.end(),
-            [&](lz77::Factor literal){
-                ++z;
-            },
-            [&](lz77::Factor ref){
-                ++z;
-            });
-        return z;
+    std::string load_input(size_t const n) {
+        zk::internal::MemoryTimePhase t;
+        std::cout << "load file " << filename << " (n=" << n << ") ... "; std::cout.flush();
+        t.start();
+        auto s = iopp::load_file_str(filename, n);
+        t.stop();
+        std::cout << "(" << (size_t)t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms)" << std::endl;
+        return s;
     }
 
-    size_t factorize_vbyte(zk::SampledLPFFactorizer& factorizer, std::string const& s, iopp::FileOutputStream& out) {
+    template<typename Factorizer>
+    size_t factorize(Factorizer& factorizer, size_t const n) {
         size_t z = 0;
+
+        auto count = [&](lz77::Factor literal){ ++z; };
         if(window > 0) {
-            std::cout << ">>> DISCLAIMER: testing streaming version -- text is still loaded fully in RAM <<<" << std::endl;
-            factorizer.factorize_debug_streaming(s.begin(), s.end(), window,
-                [&](lz77::Factor literal){
-                    zk::internal::encode_vbyte(out, 0);
-                    out.put(literal.literal());
-                    ++z;
-                },
-                [&](lz77::Factor ref){
-                    zk::internal::encode_vbyte(out, ref.len);
-                    zk::internal::encode_vbyte(out, ref.src);
-                    ++z;
-                });
+            iopp::FileInputStream in(filename);
+            factorizer.factorize(in, n, window, count, count);
         } else {
-            factorizer.factorize(s.begin(), s.end(),
-                [&](lz77::Factor literal){
-                    zk::internal::encode_vbyte(out, 0);
-                    out.put(literal.literal());
-                    ++z;
-                },
-                [&](lz77::Factor ref){
-                    zk::internal::encode_vbyte(out, ref.len);
-                    zk::internal::encode_vbyte(out, ref.src);
-                    ++z;
-                });
+            auto s = load_input(n);
+            factorizer.factorize(s.begin(), s.end(), count, count);
         }
         return z;
     }
 
-    size_t factorize_block_enc(zk::SampledLPFFactorizer& factorizer, std::string const& s, auto& enc) {
+    template<typename Factorizer>
+    size_t factorize_vbyte(Factorizer& factorizer, size_t const n, iopp::FileOutputStream& out) {
         size_t z = 0;
+
+        auto emit_literal = [&](lz77::Factor literal){
+            zk::internal::encode_vbyte(out, 0);
+            out.put(literal.literal());
+            ++z;
+        };
+
+        auto emit_reference = [&](lz77::Factor ref){
+            zk::internal::encode_vbyte(out, ref.len);
+            zk::internal::encode_vbyte(out, ref.src);
+            ++z;
+        };
+
         if(window > 0) {
-            std::cout << ">>> DISCLAIMER: testing streaming version -- text is still loaded fully in RAM <<<" << std::endl;
-            factorizer.factorize_debug_streaming(s.begin(), s.end(), window,
-                [&](lz77::Factor literal){
-                    enc.write_uint(TOK_REF_LEN, 0);
-                    enc.write_char(TOK_LITERAL, literal.literal());
-                    ++z;
-                },
-                [&](lz77::Factor ref){
-                    enc.write_uint(TOK_REF_LEN, ref.len);
-                    enc.write_uint(TOK_REF_SRC, ref.src);
-                    ++z;
-                });
+            iopp::FileInputStream in(filename);
+            factorizer.factorize(in, n, window, emit_literal, emit_reference);
         } else {
-            factorizer.factorize(s.begin(), s.end(),
-                [&](lz77::Factor literal){
-                    enc.write_uint(TOK_REF_LEN, 0);
-                    enc.write_char(TOK_LITERAL, literal.literal());
-                    ++z;
-                },
-                [&](lz77::Factor ref){
-                    enc.write_uint(TOK_REF_LEN, ref.len);
-                    enc.write_uint(TOK_REF_SRC, ref.src);
-                    ++z;
-                });
+            auto s = load_input(n);
+            factorizer.factorize(s.begin(), s.end(), emit_literal, emit_reference);
         }
         return z;
+    }
+
+    template<typename Factorizer>
+    size_t factorize_block_enc(Factorizer& factorizer, size_t const n, auto& enc) {
+        size_t z = 0;
+
+        auto emit_literal = [&](lz77::Factor literal){
+            enc.write_uint(TOK_REF_LEN, 0);
+            enc.write_char(TOK_LITERAL, literal.literal());
+            ++z;
+        };
+        auto emit_reference = [&](lz77::Factor ref){
+            enc.write_uint(TOK_REF_LEN, ref.len);
+            enc.write_uint(TOK_REF_SRC, ref.src);
+            ++z;
+        };
+
+        if(window > 0) {
+            iopp::FileInputStream in(filename);
+            factorizer.factorize(in, n, window, emit_literal, emit_reference);
+        } else {
+            auto s = load_input(n);
+            factorizer.factorize(s.begin(), s.end(), emit_literal, emit_reference);
+        }
+        return z;
+    }
+
+    template<std::unsigned_integral Index>
+    size_t compress(size_t const n) {
+        zk::SampledLPFFactorizer<Index> lz77(sampling, fp_window);
+        if(!count_only) {
+            iopp::FileOutputStream fout(output_filename);
+            fout.write(MAGIC, MAGIC_LEN);
+
+            if(vbyte_coding) {
+                fout.put('V');
+                zk::internal::encode_vbyte(fout, n);
+                return factorize_vbyte(lz77, n, fout);
+            } else {
+                fout.put('B');
+                auto out = iopp::bitwise_output_to(fout);
+
+                zk::internal::BlockEncoder enc(out, block_size);
+
+                out.write(n, 64);
+                setup_encoding(enc, n);
+
+                auto const z = factorize_block_enc(lz77, n, enc);
+                enc.flush();
+                return z;
+            }
+        } else {
+            return factorize(lz77, n);
+        }
     }
 
 public:
@@ -187,39 +220,12 @@ public:
             }
 
             size_t z = 0;
-            
             {
-                std::cout << "load file " << filename << " (n=" << n << ") ... "; std::cout.flush();
                 t.start();
-                auto s = iopp::load_file_str(filename, n);
-                t.stop();
-                std::cout << "(" << (size_t)t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
-                
-                zk::SampledLPFFactorizer lz77(sampling, fp_window);
-                t.start();
-                if(!count_only) {
-                    iopp::FileOutputStream fout(output_filename);
-                    fout.write(MAGIC, MAGIC_LEN);
-
-                    if(vbyte_coding) {
-                        fout.put('V');
-                        zk::internal::encode_vbyte(fout, n);
-                        z = factorize_vbyte(lz77, s, fout);
-                    } else {
-                        fout.put('B');
-                        auto out = iopp::bitwise_output_to(fout);
-
-                        zk::internal::BlockEncoder enc(out, block_size);
-
-                        out.write(n, 64);
-                        setup_encoding(enc, n);
-
-                        z = factorize_block_enc(lz77, s, enc);
-
-                        enc.flush();
-                    }
+                if(n <= MAX_SIZE_32BIT) {
+                    z = compress<uint32_t>(n);
                 } else {
-                    z = factorize(lz77, s);
+                    z = compress<uint64_t>(n);
                 }
                 t.stop();
             }

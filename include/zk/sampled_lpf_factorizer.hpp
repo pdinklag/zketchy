@@ -31,6 +31,7 @@
 
 namespace zk {
 
+template<std::unsigned_integral Index>
 class SampledLPFFactorizer {
 private:
     static constexpr bool debug_ = true;
@@ -43,7 +44,6 @@ private:
     using MIndex = uint32_t; // nb: we generally assume that we won't ever have more than 4G metacharacters...
     using MLength = uint32_t;
 
-    template<std::unsigned_integral Index>
     struct Metachar {
         Index occ;
         MLength len;
@@ -51,16 +51,12 @@ private:
     } __attribute__((packed));
 
     static constexpr Fingerprint rolling_fp_base_ = (1ULL << 16) - 39;
-    static constexpr size_t MAX_SIZE_32BIT = 1ULL << 31;
 
     size_t sampling_;
     size_t fp_window_;
 
-    template<typename InputStream, std::unsigned_integral Index, bool has_text_access>
-    void factorize(InputStream& in, size_t const block_size, std::string_view const& t, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
-        using M = Metachar<Index>;
-
-        Index const n = t.size();
+    template<typename InputStream, bool has_text_access>
+    void factorize(InputStream& in, size_t const block_size, std::string_view const& t, size_t const n, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
         auto const num_threads = omp_get_max_threads();
         size_t const s = (1ULL << sampling_) - 1;
 
@@ -69,7 +65,7 @@ private:
         size_t gap_total = 0, gap_num = 0;
 
         // parsing
-        std::vector<M> meta;
+        std::vector<Metachar> meta;
         std::unique_ptr<char[]> meta_buf;
         std::unique_ptr<Index[]> meta_ptr;
         std::vector<Index> parsing;
@@ -88,7 +84,7 @@ private:
             auto roll_trigger = [&](Fingerprint& fp, char const* p){ fp = rk_trigger.roll(fp, *(p-fp_window_), *p); };
             auto push_meta = [&](Fingerprint64& fp, char const* p){ fp = rk_meta.push(fp, *p); };
 
-            std::vector<std::unique_ptr<std::vector<M>>> pre_parsing;
+            std::vector<std::unique_ptr<std::vector<Metachar>>> pre_parsing;
 
             internal::OverlappingBlocks<InputStream> block;
             bool done;
@@ -109,7 +105,7 @@ private:
 
                 // add p partial parsings for each block
                 for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
-                    pre_parsing.emplace_back(std::make_unique<std::vector<M>>());
+                    pre_parsing.emplace_back(std::make_unique<std::vector<Metachar>>());
                 }
 
                 #pragma omp parallel
@@ -160,7 +156,7 @@ private:
 
                     for(; last < end && p < t_end; p++) {
                         if((fp_trigger & s) == 0) {
-                            local_pre_parsing.push_back(M{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta });
+                            local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta });
                             last = p - fp_window_;
 
                             fp_meta = 0;
@@ -178,7 +174,7 @@ private:
                         if(block.last()) {
                             // we are in the last block -- introduce final metacharacter
                             // nb: this is safe if not scanning blockwise; block.last() will then always return true
-                            local_pre_parsing.push_back(M{ Index(block.offset() + (last - t_beg)), MLength(t_end - last), fp_meta });
+                            local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(t_end - last), fp_meta });
                         } else {
                             // leave a memo for the first thread processing the next block
                             prev_block_delta = t_end - last;
@@ -209,7 +205,7 @@ private:
                 phase.start();
             }
 
-            std::vector<M> pre_meta;
+            std::vector<Metachar> pre_meta;
             size_t meta_len_total = 0;
             parsing.reserve(pre_parsing_length);
             {
@@ -600,13 +596,16 @@ private:
             }
         }
 
+        size_t max_refs = 0;
         for(size_t x = 0; x < num_threads; x++) {
+            max_refs += lrefs[x]->size();
             lrefs[x]->shrink_to_fit();
         }
 
         if constexpr(debug_) {
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
+            std::cout << "\tpreliminary refs: " << max_refs << std::endl;
         }
 
         if constexpr(debug_) {
@@ -620,6 +619,30 @@ private:
             size_t cur_gap = 0;
             size_t cur_gap_begin = 0;
             std::string gap_buffer; // nb: only for streaming
+            auto emit_current_gap = [&](){
+                if(cur_gap > 0) {
+                    if constexpr(has_text_access) {
+                        for(size_t c = 0; c < cur_gap; c++) {
+                            emit_literal(t[cur_gap_begin + c]);
+                        }
+                    } else {
+                        in.seekg(cur_gap_begin, std::ios_base::beg);
+
+                        gap_buffer.resize_and_overwrite(cur_gap, [&](char* data, size_t num){
+                            in.read(data, num);
+                            return in.gcount();
+                        });
+
+                        for(auto c : gap_buffer) {
+                            emit_literal(c);
+                        }
+                    }
+
+                    ++gap_num;
+                    cur_gap = 0;
+                }
+            };
+
             size_t x = 0;
             size_t i = 0;
             size_t j = 0;
@@ -630,29 +653,6 @@ private:
                 if(x < num_threads && j >= lrefs[x]->size()) {
                     ++x;
                     j = 0;
-                }
-            };
-            auto emit_current_gap = [&](){
-                if(cur_gap > 0) {
-                    if constexpr(has_text_access) {
-                        for(size_t j = 0; j < cur_gap; j++) {
-                            emit_literal(t[cur_gap_begin + j]);
-                        }
-                    } else {
-                        in.seekg(cur_gap_begin, std::ios_base::beg);
-
-                        gap_buffer.resize_and_overwrite(cur_gap, [&](char* data, size_t num){
-                            in.read(data, num);
-                            return in.gcount();
-                        });
-
-                        for(size_t j = 0; j < cur_gap; j++) {
-                            emit_literal(gap_buffer[j]);
-                        }
-                    }
-
-                    ++gap_num;
-                    cur_gap = 0;
                 }
             };
 
@@ -702,9 +702,9 @@ public:
         : sampling_(sampling), fp_window_(fp_window) {
     }
 
-    template<typename InputStream, std::unsigned_integral Index>
-    void factorize(InputStream& in, size_t const block_size, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
-        factorize<InputStream, Index, false>(in, block_size, std::string_view(), emit_literal, emit_reference);
+    template<typename InputStream>
+    void factorize(InputStream& in, size_t const n, size_t const block_size, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
+        factorize<InputStream, false>(in, block_size, std::string_view(), n, emit_literal, emit_reference);
     }
 
     template<std::contiguous_iterator Input>
@@ -719,25 +719,7 @@ public:
             using int_type = int;
         };
         NoStream no_stream;
-        if(n < MAX_SIZE_32BIT) {
-            factorize<NoStream, uint32_t, true>(no_stream, 0, t, emit_literal, emit_reference);
-        } else {
-            factorize<NoStream, uint64_t, true>(no_stream, 0, t, emit_literal, emit_reference);
-        }
-    }
-
-    template<std::contiguous_iterator Input>
-    requires (sizeof(std::iter_value_t<Input>) == 1)
-    void factorize_debug_streaming(Input begin, Input const& end, size_t const block_size, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
-        std::string_view const t(begin, end);
-        size_t const n = t.size();
-
-        internal::MemoryInputStream in(t.data(), t.size());
-        if(n < MAX_SIZE_32BIT) {
-            factorize<decltype(in), uint32_t, false>(in, block_size, t, emit_literal, emit_reference);
-        } else {
-            factorize<decltype(in), uint64_t, false>(in, block_size, t, emit_literal, emit_reference);
-        }
+        factorize<NoStream, true>(no_stream, 0, t, n, emit_literal, emit_reference);
     }
 
     template<std::contiguous_iterator Input, std::output_iterator<lz77::Factor> Output>
