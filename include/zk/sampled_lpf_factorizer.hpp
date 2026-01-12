@@ -618,6 +618,8 @@ private:
         // emit
         {
             size_t cur_gap = 0;
+            size_t cur_gap_begin = 0;
+            std::string gap_buffer; // nb: only for streaming
             size_t x = 0;
             size_t i = 0;
             size_t j = 0;
@@ -630,29 +632,59 @@ private:
                     j = 0;
                 }
             };
-            
+            auto emit_current_gap = [&](){
+                if(cur_gap > 0) {
+                    if constexpr(has_text_access) {
+                        for(size_t j = 0; j < cur_gap; j++) {
+                            emit_literal(t[cur_gap_begin + j]);
+                        }
+                    } else {
+                        in.seekg(cur_gap_begin, std::ios_base::beg);
+
+                        gap_buffer.resize_and_overwrite(cur_gap, [&](char* data, size_t num){
+                            in.read(data, num);
+                            return in.gcount();
+                        });
+
+                        for(size_t j = 0; j < cur_gap; j++) {
+                            emit_literal(gap_buffer[j]);
+                        }
+                    }
+
+                    ++gap_num;
+                    cur_gap = 0;
+                }
+            };
+
+            if constexpr(!has_text_access) {
+                gap_buffer.reserve(2 * s); // the expected gap length would be s, reserve a little more
+            }
+
             while(i < n) {
                 while(has_next_ref() && i > next_ref().end()) {
                     advance_ref();
                 }
 
                 if(has_next_ref() && i >= next_ref().beg) {
+                    // emit gap up until reference
+                    emit_current_gap();
+
+                    // emit reference
                     auto const& ref = next_ref();
                     auto const d = i - ref.beg;
                     emit_reference(lz77::Factor(ref.src, ref.len - d));
                     i = ref.end() + 1;
+                    cur_gap_begin = i;
+
+                    // advance
                     advance_ref();
-
-                    if(cur_gap > 0) ++gap_num;
-                    cur_gap = 0;
                 } else {
-                    emit_literal(t[i++]);
-
                     ++gap_total;
                     ++cur_gap;
+                    ++i;
                 }
             }
-            if(cur_gap > 0) ++gap_num;
+            emit_current_gap();
         }
         
         if constexpr(debug_) {
