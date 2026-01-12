@@ -237,7 +237,7 @@ private:
 
                         pos += x.len - fp_window_;
                     }
-                    // pre_parsing[i].reset();
+                    pre_parsing[i].reset();
                 }
                 std::cout << "(skipped=" << skipped << ", final pos=" << pos << ") ";
             }
