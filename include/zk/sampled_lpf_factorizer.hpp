@@ -62,8 +62,6 @@ private:
 
         internal::MemoryTimePhase phase;
 
-        size_t gap_total = 0, gap_num = 0;
-
         // parsing
         std::vector<Metachar> meta;
         std::unique_ptr<char[]> meta_buf;
@@ -616,6 +614,8 @@ private:
         }
 
         // emit
+        size_t gap_total = 0, gap_num = 0;
+        size_t copy_total = 0, copy_num = 0;
         {
             size_t cur_gap = 0;
             size_t cur_gap_begin = 0;
@@ -674,6 +674,10 @@ private:
                     auto const& ref = next_ref();
                     auto const d = i - ref.beg;
                     emit_reference(lz77::Factor(ref.src, ref.len - d));
+
+                    copy_total += ref.len - d;
+                    ++copy_num;
+
                     i = ref.end() + 1;
                     cur_gap_begin = i;
 
@@ -693,8 +697,10 @@ private:
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
 
             double const avg_gap_len = double(gap_total) / double(gap_num);
+            double const avg_copy_len = double(copy_total) / double(copy_num);
             std::cout << std::endl;
             std::cout << "average gap length: " << avg_gap_len << " (of " << gap_num << " gaps with total length " << gap_total << ")" << std::endl;
+            std::cout << "average copy length: " << avg_copy_len << " (of " << copy_num << " copy phrases with total length " << copy_total << ")" << std::endl;
         }
     }
 
