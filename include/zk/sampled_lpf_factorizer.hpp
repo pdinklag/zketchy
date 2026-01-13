@@ -70,7 +70,7 @@ private:
 
         {
             if constexpr(debug_) {
-                std::cout << "parallel pre-parse ... ";
+                std::cout << "parallel pre-parse (num_threads=" << num_threads << ") ... ";
                 std::cout.flush();
                 phase.start();
             }

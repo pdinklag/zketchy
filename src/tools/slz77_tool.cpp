@@ -230,8 +230,9 @@ public:
                 t.stop();
             }
             
-            if constexpr(zk::internal::do_benchmark) {                
-                std::cout << "n=" << n << ", z=" << z << ", t=" << t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", m=" << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << std::endl;
+            if constexpr(zk::internal::do_benchmark) {
+                auto const nout = std::filesystem::file_size(output_filename);
+                std::cout << "n=" << n << ", z=" << z << ", nout=" << nout << ", t=" << t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", m=" << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << std::endl;
             }
         }
         return 0;
