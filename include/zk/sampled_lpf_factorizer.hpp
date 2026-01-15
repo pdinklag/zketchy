@@ -97,6 +97,7 @@ private:
             // when the last thread reaches the end of a block (not the last) and has not yet found a trigger string,
             // it leaves this delta for the first thread processing the next block
             Index prev_block_delta;
+            Fingerprint64 prev_block_fp;
             do {
                 size_t const pre_parsing_offs = pre_parsing.size();
                 Index const num_per_thread = internal::idiv_ceil(has_text_access ? n : block.size(), num_threads);
@@ -140,6 +141,7 @@ private:
                     if(thread_num == 0 && !block.first()) {
                         // if this is not the first block, the first thread must use whatever memo the last thread left from the previous block
                         last -= prev_block_delta;
+                        fp_meta = prev_block_fp;
                     }
 
                     char const* p = beg;
@@ -167,6 +169,9 @@ private:
                         push_meta(fp_meta, p);
                     }
 
+                    // nb: this prevents prev_block information to be written by the last thread before the first thread read it, which actually happens for small windows!
+                    #pragma omp barrier
+
                     // the last thread must either introduce the final metacharacter, or leave information for the first thread regarding the next block
                     if(thread_num == num_threads - 1 && last < t_end) {
                         if(block.last()) {
@@ -176,6 +181,7 @@ private:
                         } else {
                             // leave a memo for the first thread processing the next block
                             prev_block_delta = t_end - last;
+                            prev_block_fp = fp_meta;
                         }
                     }
                 }
@@ -217,8 +223,11 @@ private:
                             // a thread may have parsed beyond its block boundary to the next trigger string
                             ++skipped;
                             continue;
-                        };
-                        if(x.occ > pos)[[unlikely]] std::abort();
+                        }
+
+                        if(x.occ > pos)[[unlikely]] {
+                            std::abort();
+                        }
 
                         auto const fp = x.fp;
                         auto it = meta_fps.find(fp);
