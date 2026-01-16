@@ -48,6 +48,7 @@ private:
         Index occ;
         MLength len;
         Fingerprint64 fp;
+        Index block;
         Index thread;
     } __attribute__((packed));
 
@@ -84,6 +85,7 @@ private:
         {
             if constexpr(debug_) {
                 std::cout << "parallel pre-parse (num_threads=" << num_threads << ") ... ";
+                std::cout << std::endl; // FIXME: remove later
                 std::cout.flush();
                 phase.start();
             }
@@ -111,9 +113,11 @@ private:
             // it leaves this delta for the first thread processing the next block
             Index prev_block_delta;
             Fingerprint64 prev_block_fp;
+            Index block_num = 0;
             do {
                 size_t const pre_parsing_offs = pre_parsing.size();
                 Index const num_per_thread = internal::idiv_ceil(has_text_access ? n : block.size(), num_threads);
+                std::cout << "block " << block_num << ", size=" << block.size() << ", num_per_thread=" << num_per_thread << std::endl;
 
                 // add p partial parsings for each block
                 for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
@@ -142,7 +146,7 @@ private:
                     Fingerprint fp_trigger = 0;
                     Fingerprint64 fp_meta = 0;
                     bool skip_first = false;
-                    char const* last = beg;
+                    char const* last = beg - fp_window_;
 
                     if(thread_num > 0 || !block.first()) {
                         // consider previous characters for consistent triggering
@@ -151,13 +155,13 @@ private:
                             push_trigger(fp_trigger, p);
                         }
 
-                        if((fp_trigger & s) != 0) skip_first = true; // if that string was not a trigger string, the previous thread will scan beyond its boundaries
-                        else last -= fp_window_; // otherwise, the next metacharacter starts with that one
+                        // the previous thread will scan beyond its boundaries until it hits a trigger string, so we'll ignore the first one we find
+                        skip_first = true;
                     }
 
                     if(thread_num == 0 && !block.first()) {
                         // if this is not the first block, the first thread must use whatever memo the last thread left from the previous block
-                        last -= prev_block_delta;
+                        last = beg - prev_block_delta;
                         fp_meta = prev_block_fp;
                     }
 
@@ -165,18 +169,20 @@ private:
 
                     // the first thread must fingerprint the initial window if this is the first block
                     if(thread_num == 0 && block.first()) {
+                        last = beg;
                         for(; p < end && p < beg + fp_window_; p++) {
                             push_trigger(fp_trigger, p);
                             push_meta(fp_meta, p);
                         }
                     }
 
-                    for(; last < end && p < t_end; p++) {
+                    for(; last + fp_window_ < end && p < t_end; p++) {
                         if((fp_trigger & s) == 0) {
                             if(skip_first)[[unlikely]] {
+                                std::cout.flush();
                                 skip_first = false;
                             } else {
-                                local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta, thread_num });
+                                local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta, block_num, thread_num });
                             }
 
                             last = p - fp_window_;
@@ -199,7 +205,7 @@ private:
                         if(block.last()) {
                             // we are in the last block -- introduce final metacharacter
                             // nb: this is safe if not scanning blockwise; block.last() will then always return true
-                            local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(t_end - last), fp_meta, thread_num });
+                            local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(t_end - last), fp_meta, block_num, thread_num });
                         } else {
                             // leave a memo for the first thread processing the next block
                             prev_block_delta = t_end - last;
@@ -212,10 +218,15 @@ private:
                     // advance to next block
                     done = !block.advance();
                 }
+                ++block_num;
             } while(!done);
 
             // DEBUG
             {
+                auto print_meta = [](Metachar const x){
+                    std::cout << "{occ=" << x.occ << ", len=" << x.len << ", block=" << x.block << ", thread=" << x.thread << ", fp=0x" << std::hex << x.fp << std::dec << "}";
+                };
+
                 Metachar const* prev = nullptr;
                 size_t pos = 0;
                 for(size_t i = 0; i < pre_parsing.size(); i++) {
@@ -223,16 +234,34 @@ private:
                         auto const& x = (*pre_parsing[i])[j];
                         if(x.occ < pos) {
                             // a thread may have parsed beyond its block boundary to the next trigger string
-                            std::cout << "SKIPPABLE at pos=" << pos << ": {occ=" << x.occ << ", len=" << x.len << ", thread=" << x.thread << "}, previous was {occ=" << prev->occ << ", len=" << prev->len << ", thread=" << prev->thread << "}" << std::endl;
+                            std::cout << "SKIPPABLE at pos=" << pos << ": ";
+                            print_meta(x);
+                            std::cout << " -- previous was ";
+                            print_meta(*prev);
+                            std::cout << std::endl;
                         } else if(x.occ > pos) {
-                            std::cout << "ERROR at pos=" << pos << ": {occ=" << x.occ << ", len=" << x.len << ", thread=" << x.thread << "}, previous was {occ=" << prev->occ << ", len=" << prev->len << ", thread=" << prev->thread << "}" << std::endl;
-                            std::abort();
+                            std::cout << "GAP ERROR at pos=" << pos << ": ";
+                            print_meta(x);
+                            std::cout << " -- previous was ";
+                            print_meta(*prev);
+                            std::cout << std::endl;std::abort();
                         } else {
-                            pos += x.len;
+                            pos += x.len - fp_window_; // nb: consider overlap
                             prev = &x;
                         }
                     }
                 }
+
+                // print all
+                /*
+                for(size_t i = 0; i < pre_parsing.size(); i++) {
+                    for(size_t j = 0; j < pre_parsing[i]->size(); j++) {
+                        auto const& x = (*pre_parsing[i])[j];
+                        print_meta(x);
+                        std::cout << std::endl;
+                    }
+                }
+                */
             }
 
             size_t pre_parsing_length = 0;
