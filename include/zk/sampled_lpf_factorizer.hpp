@@ -351,11 +351,14 @@ private:
             {
                 // inverse metacharacter order
                 auto meta_sorted_inv = std::make_unique<MIndex[]>(sigma);
+
+                #pragma omp parallel for
                 for(size_t i = 0; i < sigma; i++) {
                     meta_sorted_inv[meta_order[i]] = i;
                 }
 
                 // rewrite parsing
+                #pragma omp parallel for
                 for(size_t j = 0; j < m; j++) {
                     parsing[j] = meta_sorted_inv[parsing[j]];
                 }
