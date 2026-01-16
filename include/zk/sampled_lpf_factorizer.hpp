@@ -117,7 +117,6 @@ private:
             do {
                 size_t const pre_parsing_offs = pre_parsing.size();
                 Index const num_per_thread = internal::idiv_ceil(has_text_access ? n : block.size(), num_threads);
-                std::cout << "block " << block_num << ", size=" << block.size() << ", num_per_thread=" << num_per_thread << std::endl;
 
                 // add p partial parsings for each block
                 for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
@@ -145,41 +144,40 @@ private:
 
                     Fingerprint fp_trigger = 0;
                     Fingerprint64 fp_meta = 0;
-                    bool skip_first = false;
-                    char const* last = beg - fp_window_;
 
+                    // the previous thread will scan beyond its boundaries until it hits a trigger string, so we'll ignore the first one we find
+                    // -- unless we are the first thread :-)
+                    bool skip_first = thread_num > 0;
+
+                    // consider previous characters for consistent triggering
+                    // (when scanning blockwise, the first thread must do this too unless this is the first block)
                     if(thread_num > 0 || !block.first()) {
-                        // consider previous characters for consistent triggering
-                        // (when scanning blockwise, the first thread must do this too unless this is the first block)
                         for(char const* p = beg - fp_window_; p < beg; p++) {
                             push_trigger(fp_trigger, p);
                         }
-
-                        // the previous thread will scan beyond its boundaries until it hits a trigger string, so we'll ignore the first one we find
-                        skip_first = true;
-                    }
-
-                    if(thread_num == 0 && !block.first()) {
-                        // if this is not the first block, the first thread must use whatever memo the last thread left from the previous block
-                        last = beg - prev_block_delta;
-                        fp_meta = prev_block_fp;
                     }
 
                     char const* p = beg;
+                    char const* last = beg - fp_window_;
 
-                    // the first thread must fingerprint the initial window if this is the first block
-                    if(thread_num == 0 && block.first()) {
-                        last = beg;
-                        for(; p < end && p < beg + fp_window_; p++) {
-                            push_trigger(fp_trigger, p);
-                            push_meta(fp_meta, p);
+                    if(thread_num == 0) {
+                        if(block.first()) {
+                            // the first thread must fingerprint the initial window if this is the first block
+                            last = beg;
+                            for(; p < end && p < beg + fp_window_; p++) {
+                                push_trigger(fp_trigger, p);
+                                push_meta(fp_meta, p);
+                            }
+                        } else {
+                            // if this is not the first block, the first thread must use whatever memo the last thread left from the previous block
+                            last = beg - prev_block_delta;
+                            fp_meta = prev_block_fp;
                         }
                     }
 
                     for(; last + fp_window_ < end && p < t_end; p++) {
                         if((fp_trigger & s) == 0) {
                             if(skip_first)[[unlikely]] {
-                                std::cout.flush();
                                 skip_first = false;
                             } else {
                                 local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta, block_num, thread_num });
