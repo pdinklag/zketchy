@@ -48,7 +48,20 @@ private:
         Index occ;
         MLength len;
         Fingerprint64 fp;
+        Index thread;
     } __attribute__((packed));
+
+    using MMap = ankerl::unordered_dense::map<Fingerprint64, Metachar>;
+    static void merge_maps(MMap& a, MMap& b) {
+        for(auto& x : b) {
+            auto y = a.find(x.first);
+            if(y != a.end()) {
+                if(x.second.occ < y->second.occ) a[x.first] = x.second;
+            } else {
+                a[x.first] = x.second;
+            }
+        }
+    }
 
     static constexpr Fingerprint rolling_fp_base_ = (1ULL << 16) - 39;
 
@@ -128,6 +141,8 @@ private:
 
                     Fingerprint fp_trigger = 0;
                     Fingerprint64 fp_meta = 0;
+                    bool skip_first = false;
+                    char const* last = beg;
 
                     if(thread_num > 0 || !block.first()) {
                         // consider previous characters for consistent triggering
@@ -135,9 +150,11 @@ private:
                         for(char const* p = beg - fp_window_; p < beg; p++) {
                             push_trigger(fp_trigger, p);
                         }
+
+                        if((fp_trigger & s) != 0) skip_first = true; // if that string was not a trigger string, the previous thread will scan beyond its boundaries
+                        else last -= fp_window_; // otherwise, the next metacharacter starts with that one
                     }
 
-                    char const* last = beg;
                     if(thread_num == 0 && !block.first()) {
                         // if this is not the first block, the first thread must use whatever memo the last thread left from the previous block
                         last -= prev_block_delta;
@@ -156,7 +173,12 @@ private:
 
                     for(; last < end && p < t_end; p++) {
                         if((fp_trigger & s) == 0) {
-                            local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta });
+                            if(skip_first)[[unlikely]] {
+                                skip_first = false;
+                            } else {
+                                local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta, thread_num });
+                            }
+
                             last = p - fp_window_;
 
                             fp_meta = 0;
@@ -177,7 +199,7 @@ private:
                         if(block.last()) {
                             // we are in the last block -- introduce final metacharacter
                             // nb: this is safe if not scanning blockwise; block.last() will then always return true
-                            local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(t_end - last), fp_meta });
+                            local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(t_end - last), fp_meta, thread_num });
                         } else {
                             // leave a memo for the first thread processing the next block
                             prev_block_delta = t_end - last;
@@ -191,6 +213,27 @@ private:
                     done = !block.advance();
                 }
             } while(!done);
+
+            // DEBUG
+            {
+                Metachar const* prev = nullptr;
+                size_t pos = 0;
+                for(size_t i = 0; i < pre_parsing.size(); i++) {
+                    for(size_t j = 0; j < pre_parsing[i]->size(); j++) {
+                        auto const& x = (*pre_parsing[i])[j];
+                        if(x.occ < pos) {
+                            // a thread may have parsed beyond its block boundary to the next trigger string
+                            std::cout << "SKIPPABLE at pos=" << pos << ": {occ=" << x.occ << ", len=" << x.len << ", thread=" << x.thread << "}, previous was {occ=" << prev->occ << ", len=" << prev->len << ", thread=" << prev->thread << "}" << std::endl;
+                        } else if(x.occ > pos) {
+                            std::cout << "ERROR at pos=" << pos << ": {occ=" << x.occ << ", len=" << x.len << ", thread=" << x.thread << "}, previous was {occ=" << prev->occ << ", len=" << prev->len << ", thread=" << prev->thread << "}" << std::endl;
+                            std::abort();
+                        } else {
+                            pos += x.len;
+                            prev = &x;
+                        }
+                    }
+                }
+            }
 
             size_t pre_parsing_length = 0;
             for(size_t i = 0; i < pre_parsing.size(); i++) {
@@ -212,6 +255,77 @@ private:
             std::vector<Metachar> pre_meta;
             size_t meta_len_total = 0;
             parsing.reserve(pre_parsing_length);
+
+            {
+                // parallel implementation
+                
+                // we first build p independent maps
+                std::unique_ptr<MMap> lmap[num_threads];
+                for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
+                    lmap[thread_num] = std::make_unique<MMap>();
+                }
+
+                #pragma omp parallel for
+                for(size_t i = 0; i < pre_parsing.size(); i++) {
+                    auto& map = *lmap[omp_get_thread_num()];
+
+                    for(size_t j = 0; j < pre_parsing[i]->size(); j++) {
+                        auto const& x = (*pre_parsing[i])[j];
+                        auto const fp = x.fp;
+
+                        auto it = map.find(fp);
+                        if(it == map.end()) {
+                            map.emplace(fp, x);
+                        }
+                    }
+                }
+
+                // now we reduce it to one
+                #pragma omp declare reduction(merge_maps : MMap : merge_maps(omp_out, omp_in)) initializer (omp_priv=omp_orig)
+
+                MMap distinct;
+
+                #pragma omp parallel for reduction(merge_maps : distinct)
+                for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
+                    merge_maps(distinct, *lmap[thread_num]);
+                }
+
+                // convert it to a list and build a mapping
+                ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps(distinct.size());
+                pre_meta.reserve(distinct.size());
+                for(auto& x : distinct) {
+                    meta_len_total += x.second.len;
+                    auto const fp = x.second.fp;
+                    meta_fps.emplace(fp, pre_meta.size());
+                    pre_meta.push_back(x.second);
+                }
+
+                // compute the parsing in parallel
+                std::vector<size_t> offset;
+                {
+                    offset.reserve(pre_parsing.size());
+                    size_t prefix_sum = 0;
+                    for(auto& x : pre_parsing) {
+                        offset.emplace_back(prefix_sum);
+                        prefix_sum += x->size();
+                    }
+                }
+
+                parsing.resize(pre_parsing_length);
+
+                #pragma omp parallel for
+                for(size_t i = 0; i < pre_parsing.size(); i++) {
+                    size_t p = offset[i];
+                    for(size_t j = 0; j < pre_parsing[i]->size(); j++) {
+                        auto const& x = (*pre_parsing[i])[j];
+                        auto const fp = x.fp;
+                        parsing[p++] = meta_fps[fp];
+                    }
+                    pre_parsing[i].reset();
+                }
+            }
+
+            /*
             {
                 ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps;
                 size_t pos = 0;
@@ -248,6 +362,7 @@ private:
                 }
                 std::cout << "(skipped=" << skipped << ", final pos=" << pos << ") ";
             }
+            */
 
             if(pre_meta.size() >= 4_Gi) std::abort(); // if this happens, you wouldn't want to wait for the result anyway
             pre_meta.shrink_to_fit();
