@@ -88,7 +88,6 @@ private:
         {
             if constexpr(debug_) {
                 std::cout << "parallel pre-parse (num_threads=" << num_threads << ") ... ";
-                std::cout << std::endl; // FIXME: remove later
                 std::cout.flush();
                 phase.start();
             }
