@@ -44,18 +44,13 @@ private:
     using MIndex = uint32_t; // nb: we generally assume that we won't ever have more than 4G metacharacters...
     using MLength = uint32_t;
 
-    struct MetacharWithFingerprint {
+    struct Metachar {
         Index occ;
         MLength len;
         Fingerprint64 fp;
     } __attribute__((packed));
 
-    struct Metachar {
-        Index occ;
-        MLength len;
-    } __attribute__((packed));
-
-    using MMap = ankerl::unordered_dense::map<Fingerprint64, MetacharWithFingerprint const*>;
+    using MMap = ankerl::unordered_dense::map<Fingerprint64, Metachar const*>;
     static void merge_maps(MMap& a, MMap& b) {
         for(auto& x : b) {
             auto y = a.find(x.first);
@@ -99,7 +94,7 @@ private:
             auto roll_trigger = [&](Fingerprint& fp, char const* p){ fp = rk_trigger.roll(fp, *(p-fp_window_), *p); };
             auto push_meta = [&](Fingerprint64& fp, char const* p){ fp = rk_meta.push(fp, *p); };
 
-            std::vector<std::unique_ptr<std::vector<MetacharWithFingerprint>>> pre_parsing;
+            std::vector<std::unique_ptr<std::vector<Metachar>>> pre_parsing;
 
             internal::OverlappingBlocks<InputStream> block;
             bool done;
@@ -122,7 +117,7 @@ private:
 
                 // add p partial parsings for each block
                 for(size_t thread_num = 0; thread_num < num_threads; thread_num++) {
-                    pre_parsing.emplace_back(std::make_unique<std::vector<MetacharWithFingerprint>>());
+                    pre_parsing.emplace_back(std::make_unique<std::vector<Metachar>>());
                 }
 
                 #pragma omp parallel
@@ -182,7 +177,7 @@ private:
                             if(skip_first)[[unlikely]] {
                                 skip_first = false;
                             } else {
-                                local_pre_parsing.push_back(MetacharWithFingerprint{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta });
+                                local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(p - last), fp_meta });
                             }
 
                             last = p - fp_window_;
@@ -205,7 +200,7 @@ private:
                         if(block.last()) {
                             // we are in the last block -- introduce final metacharacter
                             // nb: this is safe if not scanning blockwise; block.last() will then always return true
-                            local_pre_parsing.push_back(MetacharWithFingerprint{ Index(block.offset() + (last - t_beg)), MLength(t_end - last), fp_meta });
+                            local_pre_parsing.push_back(Metachar{ Index(block.offset() + (last - t_beg)), MLength(t_end - last), fp_meta });
                         } else {
                             // leave a memo for the first thread processing the next block
                             prev_block_delta = t_end - last;
@@ -278,14 +273,25 @@ private:
 
                 if(distinct.size() >= 4_Gi) std::abort(); // if this happens, you wouldn't want to wait for the result anyway
 
-                // convert it to a list and build a mapping
-                ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps(distinct.size());
+                // convert it to a list
                 pre_meta.reserve(distinct.size());
                 for(auto& x : distinct) {
-                    meta_len_total += x.second->len;
-                    auto const fp = x.second->fp;
-                    meta_fps.emplace(fp, pre_meta.size());
-                    pre_meta.push_back(Metachar{ x.second->occ, x.second->len });
+                    pre_meta.push_back(*x.second);
+                }
+
+                if constexpr(!has_text_access) {
+                    if(num_threads > 1) {
+                        // sort by position of occurrence - be friendly to load metacharacters... :-)
+                        std::sort(std::execution::par_unseq, pre_meta.begin(), pre_meta.end(), [](Metachar const& a, Metachar const& b){ return a.occ < b.occ; });
+                    }
+                }
+
+                // compute mapping
+                ankerl::unordered_dense::map<Fingerprint64, MIndex> meta_fps(distinct.size());
+                for(size_t i = 0; i < pre_meta.size(); i++) {
+                    auto const fp = pre_meta[i].fp;
+                    meta_fps.emplace(fp, i);
+                    meta_len_total += pre_meta[i].len;
                 }
 
                 // compute the parsing in parallel
