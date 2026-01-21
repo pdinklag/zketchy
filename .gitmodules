@@ -22,3 +22,6 @@
 [submodule "extlib/cmdline"]
 	path = extlib/cmdline
 	url = https://github.com/pdinklag/cmdline.git
+[submodule "extlib/gsaca-double-sort"]
+	path = extlib/gsaca-double-sort
+	url = https://github.com/jonas-ellert/gsaca-double-sort.git

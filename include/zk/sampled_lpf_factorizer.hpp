@@ -22,6 +22,7 @@
 #include <lz77/emit_function.hpp>
 #include <libsais.h>
 #include <libsais64.h>
+#include <gsaca-double-sort-par.hpp>
 
 #include "internal/benchmark.hpp"
 #include "internal/io/memory_input_stream.hpp"
@@ -534,15 +535,10 @@ private:
             std::cout.flush();
             phase.start();
         }
-
-        auto const sa_extra_space = 6 * sigma; // recommended for libsais
-        auto sa = std::make_unique<Index[]>(m + sa_extra_space);
-        if constexpr(std::numeric_limits<Index>::digits > 32) {
-            libsais64_long_omp((int64_t*)parsing.data(), (int64_t*)sa.get(), m, sigma, sa_extra_space, num_threads);
-        } else {
-            libsais_int_omp((int32_t*)parsing.data(), (int32_t*)sa.get(), m, sigma, sa_extra_space, num_threads);
-        }
-
+        
+        auto sa = std::make_unique<Index[]>(m);
+        gsaca_ds2_par(parsing.data(), sa.get(), m, num_threads);
+        
         if constexpr(debug_) {
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;

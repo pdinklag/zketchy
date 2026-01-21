@@ -1,6 +1,11 @@
 add_subdirectory(cmdline)
 add_subdirectory(code)
 add_subdirectory(fp)
+
+add_library(gsaca INTERFACE)
+target_include_directories(gsaca INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/gsaca-double-sort)
+target_link_libraries(gsaca INTERFACE atomic)
+
 add_subdirectory(iopp)
 
 option(LIBSAIS_USE_OPENMP "Use OpenMP for parallelization" ON)

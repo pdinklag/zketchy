@@ -19,7 +19,7 @@ target_link_libraries(psamplz-tool zk-psamplz cmdline)
 set_target_properties(psamplz-tool PROPERTIES OUTPUT_NAME "psamplz")
 
 add_executable(slz77-tool slz77_tool.cpp)
-target_link_libraries(slz77-tool ${TBB_LIBRARIES} code fp iopp lz77 pm-malloc cmdline unordered_dense)
+target_link_libraries(slz77-tool ${TBB_LIBRARIES} code fp gsaca iopp lz77 pm-malloc cmdline unordered_dense)
 set_target_properties(slz77-tool PROPERTIES OUTPUT_NAME "slz77")
 
 add_executable(rearrange-tool rearrange_tool.cpp)
