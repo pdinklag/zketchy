@@ -537,7 +537,7 @@ private:
         }
         
         auto sa = std::make_unique<Index[]>(m);
-        gsaca_ds2_par(parsing.data(), sa.get(), m, num_threads);
+        gsaca_for_lce(parsing.data(), sa.get(), m, num_threads);
         
         if constexpr(debug_) {
             phase.stop();
