@@ -782,27 +782,38 @@ private:
             // FIXME: this "iterator" fails if any thread does not emit any refs
             RefListIterator it(lrefs, num_threads);
             while(i < n) {
+                // advance to next reference covering position i
                 while(it && i > it->end()) {
                     ++it;
                 }
 
+                Ref const* next = nullptr;
                 if(it && i >= it->beg) {
+                    next = &*it;
+
+                    // probe for a better copy covering also position i
+                    auto probe = it;
+                    while(++probe && i >= probe->beg) {
+                        size_t const effective_len = probe->len - (i - probe->beg);
+                        if(effective_len > next->len) {
+                            next = &*probe;
+                        }
+                    }
+                }
+
+                if(next) {
                     // emit gap up until reference
                     emit_current_gap();
 
                     // emit reference
-                    auto const& ref = *it;
-                    auto const d = i - ref.beg;
-                    emit_reference(lz77::Factor(ref.src, ref.len - d));
+                    auto const d = i - next->beg;
+                    emit_reference(lz77::Factor(next->src, next->len - d));
 
-                    copy_total += ref.len - d;
+                    copy_total += next->len - d;
                     ++copy_num;
 
-                    i = ref.end() + 1;
+                    i = next->end() + 1;
                     cur_gap_begin = i;
-
-                    // advance
-                    ++it;
                 } else {
                     ++gap_total;
                     ++cur_gap;
