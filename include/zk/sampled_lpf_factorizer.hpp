@@ -62,6 +62,65 @@ private:
         }
     }
 
+    struct Ref {
+        Index beg, src, len;
+        Index end() const { return beg + len - 1; }
+    } __attribute__((packed));
+
+    class RefListIterator {
+    private:
+        std::unique_ptr<std::vector<Ref>> const* refs_;
+        Index num_threads_;
+
+        Index th_, pos_;
+
+        Ref const& get() const {
+            return (*refs_[th_])[pos_];
+        }
+
+        void advance() {
+            if(++pos_ >= refs_[th_]->size()) {
+                pos_ = 0;
+
+                ++th_;
+                while(th_ < num_threads_ && refs_[th_]->empty()) {
+                    ++th_;
+                }
+            }
+        }
+
+    public:
+        RefListIterator() : num_threads_(0), th_(0) {
+        }
+
+        RefListIterator(std::unique_ptr<std::vector<Ref>> const* refs, Index const num_threads) : refs_(refs), num_threads_(num_threads), th_(0), pos_(0) {
+            while(th_ < num_threads_ && refs_[th_]->empty()) {
+                ++th_;
+            }
+        }
+
+        RefListIterator(RefListIterator&&) = default;
+        RefListIterator& operator=(RefListIterator&&) = default;
+
+        RefListIterator(RefListIterator const&) = default;
+        RefListIterator& operator=(RefListIterator const&) = default;
+
+        operator bool() const { return th_ < num_threads_; }
+        Ref const& operator*() { return get(); }
+        Ref const* operator->() { return &get(); }
+
+        RefListIterator& operator++() {
+            advance();
+            return *this;
+        }
+
+        RefListIterator operator++(int) {
+            auto copy = *this;
+            advance();
+            return copy;
+        }
+    };
+
     static constexpr Fingerprint rolling_fp_base_ = (1ULL << 16) - 39;
 
     size_t sampling_;
@@ -510,11 +569,6 @@ private:
         }
 
         // factorize
-        struct Ref {
-            Index beg, src, len;
-            Index end() const { return beg + len - 1; }
-        } __attribute__((packed));
-
         std::unique_ptr<std::vector<Ref>> lrefs[num_threads];
         for(size_t x = 0; x < num_threads; x++) {
             lrefs[x] = std::make_unique<std::vector<Ref>>();
@@ -723,34 +777,21 @@ private:
                 }
             };
 
-            size_t x = 0;
             size_t i = 0;
-            size_t j = 0;
-            auto has_next_ref = [&](){ return x < num_threads && j < lrefs[x]->size(); };
-            auto next_ref = [&](){ return (*lrefs[x])[j]; };
-            auto advance_ref = [&](){
-                ++j;
-                if(x < num_threads && j >= lrefs[x]->size()) {
-                    ++x;
-                    j = 0;
-                }
-            };
 
-            if constexpr(!has_text_access) {
-                gap_buffer.reserve(2 * s); // the expected gap length would be s, reserve a little more
-            }
-
+            // FIXME: this "iterator" fails if any thread does not emit any refs
+            RefListIterator it(lrefs, num_threads);
             while(i < n) {
-                while(has_next_ref() && i > next_ref().end()) {
-                    advance_ref();
+                while(it && i > it->end()) {
+                    ++it;
                 }
 
-                if(has_next_ref() && i >= next_ref().beg) {
+                if(it && i >= it->beg) {
                     // emit gap up until reference
                     emit_current_gap();
 
                     // emit reference
-                    auto const& ref = next_ref();
+                    auto const& ref = *it;
                     auto const d = i - ref.beg;
                     emit_reference(lz77::Factor(ref.src, ref.len - d));
 
@@ -761,7 +802,7 @@ private:
                     cur_gap_begin = i;
 
                     // advance
-                    advance_ref();
+                    ++it;
                 } else {
                     ++gap_total;
                     ++cur_gap;
