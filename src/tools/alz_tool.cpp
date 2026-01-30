@@ -15,8 +15,11 @@ class ALZTool : public cmdline::Program {
 private:
     static constexpr size_t MAX_SIZE_32BIT = 1ULL << 31 - 1;
 
-    static constexpr char const* MAGIC = "ALZ"; // followed by the encoding mode ('V' for VByte, 'B' for bitwise)
+    static constexpr char const* MAGIC = "ALZ"; // followed by the encoding mode, see below
     static constexpr size_t MAGIC_LEN = 3;
+
+    static constexpr char MODE_VBYTE = 'V';
+    static constexpr char MODE_BITWISE = 'B';
 
     static constexpr zk::internal::TokenType TOK_LITERAL = 0;
     static constexpr zk::internal::TokenType TOK_REF_LEN = 1;
@@ -126,11 +129,11 @@ private:
             fout.write(MAGIC, MAGIC_LEN);
 
             if(vbyte_coding) {
-                fout.put('V');
+                fout.put(MODE_VBYTE);
                 zk::internal::encode_vbyte(fout, n);
                 return factorize_vbyte(alz, n, fout);
             } else {
-                fout.put('B');
+                fout.put(MODE_BITWISE);
                 auto out = iopp::bitwise_output_to(fout);
 
                 zk::internal::BlockEncoder enc(out, block_size);
@@ -184,7 +187,20 @@ public:
                 }
 
                 char const mode = fin.get();
-                if(mode == 'B') {
+                if(mode == MODE_VBYTE) {
+                    auto const n = zk::internal::decode_vbyte(fin);
+                    while(s.length() < n) {
+                        auto const len = zk::internal::decode_vbyte(fin);
+                        if(len == 0) {
+                            s.push_back(fin.get());
+                        } else {
+                            auto const src = s.length() - zk::internal::decode_vbyte(fin);
+                            for(size_t i = 0; i < len; i++) {
+                                s.push_back(s[src + i]);
+                            }
+                        }
+                    }
+                } else if(mode == MODE_BITWISE) {
                     auto in = iopp::bitwise_input_from(fin);
 
                     zk::internal::BlockDecoder dec(in);
@@ -220,7 +236,7 @@ public:
             }
 
             if(output_filename.empty()) {
-                output_filename = filename + ".slz77";
+                output_filename = filename + ".alz";
             }
 
             size_t z = 0;
