@@ -1,3 +1,7 @@
+add_executable(alz-tool alz_tool.cpp)
+target_link_libraries(alz-tool ${TBB_LIBRARIES} code fp iopp lz77 pm-malloc cmdline unordered_dense)
+set_target_properties(alz-tool PROPERTIES OUTPUT_NAME "alz")
+
 add_executable(cscore-tool cscore_tool.cpp)
 target_link_libraries(cscore-tool zk-cscore cmdline)
 set_target_properties(cscore-tool PROPERTIES OUTPUT_NAME "cscore")
@@ -17,10 +21,6 @@ set_target_properties(lz78-lru-tool PROPERTIES OUTPUT_NAME "lz78-lru")
 add_executable(psamplz-tool psamplz_tool.cpp)
 target_link_libraries(psamplz-tool zk-psamplz cmdline)
 set_target_properties(psamplz-tool PROPERTIES OUTPUT_NAME "psamplz")
-
-add_executable(slz77-tool slz77_tool.cpp)
-target_link_libraries(slz77-tool ${TBB_LIBRARIES} code fp iopp lz77 pm-malloc cmdline unordered_dense)
-set_target_properties(slz77-tool PROPERTIES OUTPUT_NAME "slz77")
 
 add_executable(rearrange-tool rearrange_tool.cpp)
 target_link_libraries(rearrange-tool cmdline fp iopp pm-malloc unordered_dense)

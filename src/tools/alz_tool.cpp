@@ -4,19 +4,19 @@
 #include <iopp/file_output_stream.hpp>
 
 #define _ZK_SAMPLED_LPF_DEBUG
-#include <zk/sampled_lpf_factorizer.hpp>
+#include <zk/approximate_lz77.hpp>
 #include <zk/internal/io/block_coding.hpp>
 #include <zk/internal/io/vbyte_coding.hpp>
 #include <zk/internal/util/si_iec_literals.hpp>
 
 #include <zk/internal/benchmark.hpp>
 
-class SLZ77Tool : public cmdline::Program {
+class ALZTool : public cmdline::Program {
 private:
     static constexpr size_t MAX_SIZE_32BIT = 1ULL << 31 - 1;
 
-    static constexpr char const* MAGIC = "SZ77";
-    static constexpr size_t MAGIC_LEN = 4;
+    static constexpr char const* MAGIC = "ALZ"; // followed by the encoding mode ('V' for VByte, 'B' for bitwise)
+    static constexpr size_t MAGIC_LEN = 3;
 
     static constexpr zk::internal::TokenType TOK_LITERAL = 0;
     static constexpr zk::internal::TokenType TOK_REF_LEN = 1;
@@ -120,7 +120,7 @@ private:
 
     template<std::unsigned_integral Index>
     size_t compress(size_t const n) {
-        zk::SampledLPFFactorizer<Index> lz77(sampling, fp_window);
+        zk::ApproximateLZ77<Index> alz(sampling, fp_window);
         if(!count_only) {
             iopp::FileOutputStream fout(output_filename);
             fout.write(MAGIC, MAGIC_LEN);
@@ -128,7 +128,7 @@ private:
             if(vbyte_coding) {
                 fout.put('V');
                 zk::internal::encode_vbyte(fout, n);
-                return factorize_vbyte(lz77, n, fout);
+                return factorize_vbyte(alz, n, fout);
             } else {
                 fout.put('B');
                 auto out = iopp::bitwise_output_to(fout);
@@ -138,17 +138,17 @@ private:
                 out.write(n, 64);
                 setup_encoding(enc, n);
 
-                auto const z = factorize_block_enc(lz77, n, enc);
+                auto const z = factorize_block_enc(alz, n, enc);
                 enc.flush();
                 return z;
             }
         } else {
-            return factorize(lz77, n);
+            return factorize(alz, n);
         }
     }
 
 public:
-    SLZ77Tool() : cmdline::Program("LZ77", "Compute and encode the exact LZ77 factorization") {
+    ALZTool() : cmdline::Program("alz", "Compute and encode an approximate LZ77 factorization") {
         required_arg("file", filename, "The input file.");
         option('s', "sampling", sampling, "The sampling rate (2^value).");
         option('l', "len", fp_window, "The fingerprint window size.");
@@ -244,5 +244,5 @@ public:
 };
 
 int main(int argc, char** argv) {
-    return SLZ77Tool().run(argc, argv);
+    return ALZTool().run(argc, argv);
 }

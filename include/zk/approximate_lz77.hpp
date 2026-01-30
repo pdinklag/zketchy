@@ -32,7 +32,7 @@
 namespace zk {
 
 template<std::unsigned_integral Index>
-class SampledLPFFactorizer {
+class ApproximateLZ77 {
 private:
     static constexpr bool debug_ = true;
 
@@ -836,7 +836,7 @@ private:
     }
 
 public:
-    SampledLPFFactorizer(size_t sampling, size_t fp_window)
+    ApproximateLZ77(size_t sampling, size_t fp_window)
         : sampling_(sampling), fp_window_(fp_window) {
     }
 
