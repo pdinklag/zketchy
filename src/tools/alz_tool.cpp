@@ -13,7 +13,7 @@ class ALZTool : public cmdline::Program {
 private:
     static constexpr size_t MAX_SIZE_32BIT = 1ULL << 31 - 1;
 
-    static constexpr char const* MAGIC = "ALZ"; // followed by the encoding mode, see below
+    static constexpr char const* MAGIC = "ALZ";
     static constexpr size_t MAGIC_LEN = 3;
 
     static constexpr char MODE_VBYTE = 'V';
@@ -71,7 +71,7 @@ private:
 
         iopp::FileOutputStream fout(output_filename);
         fout.write(MAGIC, MAGIC_LEN);
-        fout.put(MODE_VBYTE);
+        fout.put(0); // reserved for flags
         zk::internal::encode_vbyte(fout, n);
         return factorize_vbyte(alz, n, fout);
     }
@@ -110,23 +110,19 @@ public:
                     }
                 }
 
-                char const mode = fin.get();
-                if(mode == MODE_VBYTE) {
-                    auto const n = zk::internal::decode_vbyte(fin);
-                    while(s.length() < n) {
-                        auto const len = zk::internal::decode_vbyte(fin);
-                        if(len == 0) {
-                            s.push_back(fin.get());
-                        } else {
-                            auto const src = s.length() - zk::internal::decode_vbyte(fin);
-                            for(size_t i = 0; i < len; i++) {
-                                s.push_back(s[src + i]);
-                            }
+                fin.get(); // skip currently unused flags byte
+
+                auto const n = zk::internal::decode_vbyte(fin);
+                while(s.length() < n) {
+                    auto const len = zk::internal::decode_vbyte(fin);
+                    if(len == 0) {
+                        s.push_back(fin.get());
+                    } else {
+                        auto const src = s.length() - zk::internal::decode_vbyte(fin);
+                        for(size_t i = 0; i < len; i++) {
+                            s.push_back(s[src + i]);
                         }
                     }
-                } else {
-                    std::cerr << "decompression not implemented for mode '" << mode << "'" << std::endl;
-                    std::abort();
                 }
             }
 
