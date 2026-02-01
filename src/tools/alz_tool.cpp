@@ -1,11 +1,9 @@
 #include <cmdline/program.hpp>
-#include <iopp/bitwise_io.hpp>
 #include <iopp/load_file.hpp>
 #include <iopp/file_output_stream.hpp>
 
 #define _ZK_SAMPLED_LPF_DEBUG
 #include <zk/approximate_lz77.hpp>
-#include <zk/internal/io/block_coding.hpp>
 #include <zk/internal/io/vbyte_coding.hpp>
 #include <zk/internal/util/si_iec_literals.hpp>
 
@@ -19,17 +17,6 @@ private:
     static constexpr size_t MAGIC_LEN = 3;
 
     static constexpr char MODE_VBYTE = 'V';
-    static constexpr char MODE_BITWISE = 'B';
-
-    static constexpr zk::internal::TokenType TOK_LITERAL = 0;
-    static constexpr zk::internal::TokenType TOK_REF_LEN = 1;
-    static constexpr zk::internal::TokenType TOK_REF_SRC = 2;
-
-    static void setup_encoding(zk::internal::BlockEncodingBase& enc, size_t const n) {
-        enc.register_binary(255, false); // TOK_FACT_LITERAL
-        enc.register_huffman();          // TOK_FACT_LEN
-        enc.register_binary(n, false);   // TOK_REF_SRC
-    }
 
     std::string filename;
     std::string output_filename;
@@ -42,9 +29,6 @@ private:
     uint64_t fp_window = 16;
     uint64_t window = 0;
 
-    bool count_only = false;
-    bool vbyte_coding = false;
-
     std::string load_input(size_t const n) {
         zk::internal::MemoryTimePhase t;
         std::cout << "load file " << filename << " (n=" << n << ") ... "; std::cout.flush();
@@ -53,21 +37,6 @@ private:
         t.stop();
         std::cout << "(" << (size_t)t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms)" << std::endl;
         return s;
-    }
-
-    template<typename Factorizer>
-    size_t factorize(Factorizer& factorizer, size_t const n) {
-        size_t z = 0;
-
-        auto count = [&](lz77::Factor literal){ ++z; };
-        if(window > 0) {
-            iopp::FileInputStream in(filename);
-            factorizer.factorize(in, n, window, count, count);
-        } else {
-            auto s = load_input(n);
-            factorizer.factorize(s.begin(), s.end(), count, count);
-        }
-        return z;
     }
 
     template<typename Factorizer>
@@ -96,58 +65,15 @@ private:
         return z;
     }
 
-    template<typename Factorizer>
-    size_t factorize_block_enc(Factorizer& factorizer, size_t const n, auto& enc) {
-        size_t z = 0;
-
-        auto emit_literal = [&](lz77::Factor literal){
-            enc.write_uint(TOK_REF_LEN, 0);
-            enc.write_char(TOK_LITERAL, literal.literal());
-            ++z;
-        };
-        auto emit_reference = [&](lz77::Factor ref){
-            enc.write_uint(TOK_REF_LEN, ref.len);
-            enc.write_uint(TOK_REF_SRC, ref.src);
-            ++z;
-        };
-
-        if(window > 0) {
-            iopp::FileInputStream in(filename);
-            factorizer.factorize(in, n, window, emit_literal, emit_reference);
-        } else {
-            auto s = load_input(n);
-            factorizer.factorize(s.begin(), s.end(), emit_literal, emit_reference);
-        }
-        return z;
-    }
-
     template<std::unsigned_integral Index>
     size_t compress(size_t const n) {
         zk::ApproximateLZ77<Index> alz(sampling, fp_window);
-        if(!count_only) {
-            iopp::FileOutputStream fout(output_filename);
-            fout.write(MAGIC, MAGIC_LEN);
 
-            if(vbyte_coding) {
-                fout.put(MODE_VBYTE);
-                zk::internal::encode_vbyte(fout, n);
-                return factorize_vbyte(alz, n, fout);
-            } else {
-                fout.put(MODE_BITWISE);
-                auto out = iopp::bitwise_output_to(fout);
-
-                zk::internal::BlockEncoder enc(out, block_size);
-
-                out.write(n, 64);
-                setup_encoding(enc, n);
-
-                auto const z = factorize_block_enc(alz, n, enc);
-                enc.flush();
-                return z;
-            }
-        } else {
-            return factorize(alz, n);
-        }
+        iopp::FileOutputStream fout(output_filename);
+        fout.write(MAGIC, MAGIC_LEN);
+        fout.put(MODE_VBYTE);
+        zk::internal::encode_vbyte(fout, n);
+        return factorize_vbyte(alz, n, fout);
     }
 
 public:
@@ -160,8 +86,6 @@ public:
         option('w', "window", window, "The input window size; leave at 0 to load entire input into RAM.");
         option('o', "out", output_filename, "The output filename.");
         option('d', "decompress", decompress, "Decompress the input file rather than compressing it.");
-        option("vbyte", vbyte_coding, "Use V-Byte encoding of phrases -- better suits the output for pipelining to other compressors.");
-        option("count", count_only, "Only count the factors, don't actually write to the output file.");
     }
 
     virtual int main() override {
@@ -195,24 +119,6 @@ public:
                             s.push_back(fin.get());
                         } else {
                             auto const src = s.length() - zk::internal::decode_vbyte(fin);
-                            for(size_t i = 0; i < len; i++) {
-                                s.push_back(s[src + i]);
-                            }
-                        }
-                    }
-                } else if(mode == MODE_BITWISE) {
-                    auto in = iopp::bitwise_input_from(fin);
-
-                    zk::internal::BlockDecoder dec(in);
-                    auto const n = in.read(64);
-                    setup_encoding(dec, n);
-
-                    while(in) {
-                        auto const len = dec.read_uint(TOK_REF_LEN);
-                        if(len == 0) {
-                            s.push_back(dec.read_char(TOK_LITERAL));
-                        } else {
-                            auto const src = s.length() - dec.read_uint(TOK_REF_SRC);
                             for(size_t i = 0; i < len; i++) {
                                 s.push_back(s[src + i]);
                             }
