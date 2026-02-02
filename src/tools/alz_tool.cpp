@@ -29,6 +29,14 @@ private:
     uint64_t fp_window = 16;
     uint64_t window = 0;
 
+    bool flag_collapse_gaps = false;
+
+    struct Flags {
+        bool collapse_gaps : 1;
+        uint8_t __reserved : 7;
+    };
+    static_assert(sizeof(Flags) == sizeof(char));
+
     std::string load_input(size_t const n) {
         zk::internal::MemoryTimePhase t;
         std::cout << "load file " << filename << " (n=" << n << ") ... "; std::cout.flush();
@@ -39,25 +47,44 @@ private:
         return s;
     }
 
+    template<bool collapse_gaps>
     class VByteEmitter {
     private:
         iopp::FileOutputStream* out_;
         size_t z_;
+        std::string gap_;
+
+        void flush_gap() {
+            zk::internal::encode_vbyte(*out_, gap_.length());
+            if(!gap_.empty()) {
+                out_->write(gap_.data(), gap_.length());
+            }
+            gap_.clear();
+        }
     
     public:
         VByteEmitter(iopp::FileOutputStream& out) : out_(&out), z_(0) {
         }
 
         void emit_literal(char const c) {
-            zk::internal::encode_vbyte(*out_, 0);
-            out_->put(c);
+            if constexpr(collapse_gaps) {
+                gap_.push_back(c);
+            } else {
+                zk::internal::encode_vbyte(*out_, 0);
+                out_->put(c);
+            }
             ++z_;
         }
 
         void emit_copy(uintmax_t const src, uintmax_t const len) {
+            if constexpr(collapse_gaps) flush_gap();
             zk::internal::encode_vbyte(*out_, len);
             zk::internal::encode_vbyte(*out_, src);
             ++z_;
+        }
+
+        void flush() {
+            if constexpr(collapse_gaps) flush_gap();
         }
 
         size_t num_phrases() const {
@@ -74,6 +101,7 @@ private:
             auto s = load_input(n);
             factorizer.factorize(s.begin(), s.end(), emitter);
         }
+        emitter.flush();
         return emitter.num_phrases();
     }
 
@@ -83,9 +111,16 @@ private:
 
         iopp::FileOutputStream fout(output_filename);
         fout.write(MAGIC, MAGIC_LEN);
-        fout.put(0); // reserved for flags
+
+        Flags flags { flag_collapse_gaps, 0 };
+        fout.put(*((char*)&flags));
         zk::internal::encode_vbyte(fout, n);
-        return factorize_vbyte(alz, VByteEmitter(fout), n);
+
+        if(flag_collapse_gaps) {
+            return factorize_vbyte(alz, VByteEmitter<true>(fout), n);
+        } else {
+            return factorize_vbyte(alz, VByteEmitter<false>(fout), n);
+        }
     }
 
 public:
@@ -98,6 +133,7 @@ public:
         option('w', "window", window, "The input window size; leave at 0 to load entire input into RAM.");
         option('o', "out", output_filename, "The output filename.");
         option('d', "decompress", decompress, "Decompress the input file rather than compressing it.");
+        option("collapse-gaps", flag_collapse_gaps, "Collapse gaps to length-string representation.");
     }
 
     virtual int main() override {
@@ -122,17 +158,38 @@ public:
                     }
                 }
 
-                fin.get(); // skip currently unused flags byte
+                auto const flags_char = fin.get();
+                Flags flags = *((Flags*)&flags_char);
 
                 auto const n = zk::internal::decode_vbyte(fin);
-                while(s.length() < n) {
-                    auto const len = zk::internal::decode_vbyte(fin);
-                    if(len == 0) {
-                        s.push_back(fin.get());
-                    } else {
-                        auto const src = s.length() - zk::internal::decode_vbyte(fin);
-                        for(size_t i = 0; i < len; i++) {
-                            s.push_back(s[src + i]);
+                if(flags.collapse_gaps) {
+                    while(s.length() < n) {
+                        std::string gap;
+                        auto const gap_len = zk::internal::decode_vbyte(fin);
+                        if(gap_len > 0) {
+                            gap.resize(gap_len);
+                            fin.read(gap.data(), gap_len);
+                            s.append(gap);
+                        }
+
+                        if(s.length() < n) {
+                            auto const len = zk::internal::decode_vbyte(fin);
+                            auto const src = s.length() - zk::internal::decode_vbyte(fin);
+                            for(size_t i = 0; i < len; i++) {
+                                s.push_back(s[src + i]);
+                            }
+                        }
+                    }
+                } else {
+                    while(s.length() < n) {
+                        auto const len = zk::internal::decode_vbyte(fin);
+                        if(len == 0) {
+                            s.push_back(fin.get());
+                        } else {
+                            auto const src = s.length() - zk::internal::decode_vbyte(fin);
+                            for(size_t i = 0; i < len; i++) {
+                                s.push_back(s[src + i]);
+                            }
                         }
                     }
                 }
