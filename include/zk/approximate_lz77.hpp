@@ -19,7 +19,6 @@
 #include <fp/rk61.hpp>
 #include <ankerl/unordered_dense.h>
 
-#include <lz77/emit_function.hpp>
 #include <libsais.h>
 #include <libsais64.h>
 
@@ -126,8 +125,8 @@ private:
     size_t sampling_;
     size_t fp_window_;
 
-    template<typename InputStream, bool has_text_access>
-    void factorize(InputStream& in, size_t const block_size, std::string_view const& t, size_t const n, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
+    template<typename InputStream, typename Emitter, bool has_text_access>
+    void factorize(InputStream& in, size_t const block_size, std::string_view const& t, size_t const n, Emitter& emitter) {
         auto const num_threads = omp_get_max_threads();
         size_t const s = (1ULL << sampling_) - 1;
 
@@ -757,7 +756,7 @@ private:
                 if(cur_gap > 0) {
                     if constexpr(has_text_access) {
                         for(size_t c = 0; c < cur_gap; c++) {
-                            emit_literal(t[cur_gap_begin + c]);
+                            emitter.emit_literal(t[cur_gap_begin + c]);
                         }
                     } else {
                         in.seekg(cur_gap_begin, std::ios_base::beg);
@@ -768,7 +767,7 @@ private:
                         });
 
                         for(auto c : gap_buffer) {
-                            emit_literal(c);
+                            emitter.emit_literal(c);
                         }
                     }
 
@@ -807,7 +806,7 @@ private:
 
                     // emit reference
                     auto const d = i - next->beg;
-                    emit_reference(lz77::Factor(next->src, next->len - d));
+                    emitter.emit_copy(next->src, next->len - d);
 
                     copy_total += next->len - d;
                     ++copy_num;
@@ -840,14 +839,14 @@ public:
         : sampling_(sampling), fp_window_(fp_window) {
     }
 
-    template<typename InputStream>
-    void factorize(InputStream& in, size_t const n, size_t const block_size, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
-        factorize<InputStream, false>(in, block_size, std::string_view(), n, emit_literal, emit_reference);
+    template<typename InputStream, typename Emitter>
+    void factorize(InputStream& in, size_t const n, size_t const block_size, Emitter& emitter) {
+        factorize<InputStream, Emitter, false>(in, block_size, std::string_view(), n, emitter);
     }
 
-    template<std::contiguous_iterator Input>
+    template<std::contiguous_iterator Input, typename Emitter>
     requires (sizeof(std::iter_value_t<Input>) == 1)
-    void factorize(Input begin, Input const& end, lz77::EmitFunction emit_literal, lz77::EmitFunction emit_reference) {
+    void factorize(Input begin, Input const& end, Emitter& emitter) {
         std::string_view const t(begin, end);
         size_t const n = t.size();
 
@@ -857,14 +856,7 @@ public:
             using int_type = int;
         };
         NoStream no_stream;
-        factorize<NoStream, true>(no_stream, 0, t, n, emit_literal, emit_reference);
-    }
-
-    template<std::contiguous_iterator Input, std::output_iterator<lz77::Factor> Output>
-    requires (sizeof(std::iter_value_t<Input>) == 1)
-    void factorize(Input begin, Input const& end, Output out) {
-        auto emit = [&](lz77::Factor f){ *out++ = f; };
-        factorize(begin, end, emit, emit);
+        factorize<NoStream, Emitter, true>(no_stream, 0, t, n, emitter);
     }
 };
 

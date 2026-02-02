@@ -39,30 +39,42 @@ private:
         return s;
     }
 
-    template<typename Factorizer>
-    size_t factorize_vbyte(Factorizer& factorizer, size_t const n, iopp::FileOutputStream& out) {
-        size_t z = 0;
+    class VByteEmitter {
+    private:
+        iopp::FileOutputStream* out_;
+        size_t z_;
+    
+    public:
+        VByteEmitter(iopp::FileOutputStream& out) : out_(&out), z_(0) {
+        }
 
-        auto emit_literal = [&](lz77::Factor literal){
-            zk::internal::encode_vbyte(out, 0);
-            out.put(literal.literal());
-            ++z;
-        };
+        void emit_literal(char const c) {
+            zk::internal::encode_vbyte(*out_, 0);
+            out_->put(c);
+            ++z_;
+        }
 
-        auto emit_reference = [&](lz77::Factor ref){
-            zk::internal::encode_vbyte(out, ref.len);
-            zk::internal::encode_vbyte(out, ref.src);
-            ++z;
-        };
+        void emit_copy(uintmax_t const src, uintmax_t const len) {
+            zk::internal::encode_vbyte(*out_, len);
+            zk::internal::encode_vbyte(*out_, src);
+            ++z_;
+        }
 
+        size_t num_phrases() const {
+            return z_;
+        }
+    };
+
+    template<typename Factorizer, typename Emitter>
+    size_t factorize_vbyte(Factorizer& factorizer, Emitter&& emitter, size_t const n) {
         if(window > 0) {
             iopp::FileInputStream in(filename);
-            factorizer.factorize(in, n, window, emit_literal, emit_reference);
+            factorizer.factorize(in, n, window, emitter);
         } else {
             auto s = load_input(n);
-            factorizer.factorize(s.begin(), s.end(), emit_literal, emit_reference);
+            factorizer.factorize(s.begin(), s.end(), emitter);
         }
-        return z;
+        return emitter.num_phrases();
     }
 
     template<std::unsigned_integral Index>
@@ -73,7 +85,7 @@ private:
         fout.write(MAGIC, MAGIC_LEN);
         fout.put(0); // reserved for flags
         zk::internal::encode_vbyte(fout, n);
-        return factorize_vbyte(alz, n, fout);
+        return factorize_vbyte(alz, VByteEmitter(fout), n);
     }
 
 public:
