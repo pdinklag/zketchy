@@ -2,10 +2,9 @@
 #include <iopp/load_file.hpp>
 #include <iopp/file_output_stream.hpp>
 
-#define _ZK_SAMPLED_LPF_DEBUG
+#define ALZ_VERBOSE
 #include <zk/approximate_lz77.hpp>
 #include <zk/internal/io/vbyte_coding.hpp>
-#include <zk/internal/util/si_iec_literals.hpp>
 
 #include <zk/internal/benchmark.hpp>
 
@@ -23,7 +22,6 @@ private:
     bool decompress = false;
     
     size_t prefix = SIZE_MAX;
-    uint64_t block_size = 32_Ki; // best value according to many many experiments
 
     uint64_t sampling = 4;
     uint64_t fp_window = 16;
@@ -128,7 +126,6 @@ public:
         required_arg("file", filename, "The input file.");
         option('s', "sampling", sampling, "The sampling rate (2^value).");
         option('l', "len", fp_window, "The fingerprint window size.");
-        option('b', "block-size", block_size, "The block size for encoding.");
         option('p', "prefix", prefix, "Process only this prefix of the input file.");
         option('w', "window", window, "The input window size; leave at 0 to load entire input into RAM.");
         option('o', "out", output_filename, "The output filename.");

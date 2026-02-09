@@ -32,7 +32,12 @@ namespace zk {
 template<std::unsigned_integral Index>
 class ApproximateLZ77 {
 private:
-    static constexpr bool debug_ = true;
+
+#ifdef ALZ_VERBOSE
+    static constexpr bool verbose_ = true;
+#else
+    static constexpr bool verbose_ = false;
+#endif
 
     using RK = fp::RabinKarp31;
     using RK64 = fp::RabinKarp61;
@@ -138,7 +143,7 @@ private:
         std::vector<Index> parsing;
 
         {
-            if constexpr(debug_) {
+            if constexpr(verbose_) {
                 std::cout << "parallel pre-parse (num_threads=" << num_threads << ") ... ";
                 std::cout.flush();
                 phase.start();
@@ -278,13 +283,13 @@ private:
                 pre_parsing_length += pre_parsing[i]->size();
             }
 
-            if constexpr(debug_) {
+            if constexpr(verbose_) {
                 phase.stop();
                 std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
                 std::cout << "\tpreliminary parsing length: " << pre_parsing_length << std::endl;
             }
 
-            if constexpr(debug_) {
+            if constexpr(verbose_) {
                 std::cout << "compute distinct metacharacters ... ";
                 std::cout.flush();
                 phase.start();
@@ -379,7 +384,7 @@ private:
             auto const m = parsing.size();
             auto const sigma = pre_meta.size();
 
-            if constexpr(debug_) {
+            if constexpr(verbose_) {
                 phase.stop();
 
                 std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
@@ -389,7 +394,7 @@ private:
 
             // load metacharacters
             if constexpr(!has_text_access) {
-                if constexpr(debug_) {
+                if constexpr(verbose_) {
                     std::cout << "load metacharacters ... ";
                     std::cout.flush();
                     phase.start();
@@ -417,7 +422,7 @@ private:
                     p += len;
                 }
 
-                if constexpr(debug_) {
+                if constexpr(verbose_) {
                     phase.stop();
                     std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
                     std::cout << "\tsize=" << meta_bufsize << std::endl;
@@ -425,7 +430,7 @@ private:
             }
 
             // sort meta characters
-            if constexpr(debug_) {
+            if constexpr(verbose_) {
                 std::cout << "sort metacharacters ... ";
                 std::cout.flush();
                 phase.start();
@@ -460,13 +465,13 @@ private:
                 }
             }
 
-            if constexpr(debug_) {
+            if constexpr(verbose_) {
                 phase.stop();
                 std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
             }
 
             // parse text
-            if constexpr(debug_) {
+            if constexpr(verbose_) {
                 std::cout << "compute parsing ... ";
                 std::cout.flush();
                 phase.start();
@@ -506,7 +511,7 @@ private:
                 meta_ptr = std::move(new_meta_ptr);
             }
 
-            if constexpr(debug_) {
+            if constexpr(verbose_) {
                 phase.stop();
                 std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
                 std::cout << "\tparsing length: " << parsing.size() << std::endl;
@@ -527,7 +532,7 @@ private:
         }
 
         // compute suffix array of parsing
-        if constexpr(debug_) {
+        if constexpr(verbose_) {
             std::cout << "compute suffix array ... ";
             std::cout.flush();
             phase.start();
@@ -541,13 +546,13 @@ private:
             libsais_int_omp((int32_t*)parsing.data(), (int32_t*)sa.get(), m, sigma, sa_extra_space, num_threads);
         }
 
-        if constexpr(debug_) {
+        if constexpr(verbose_) {
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
         }
 
         // compute inverse
-        if constexpr(debug_) {
+        if constexpr(verbose_) {
             std::cout << "compute inverse suffix array ... ";
             std::cout.flush();
             phase.start();
@@ -561,7 +566,7 @@ private:
             }
         }
 
-        if constexpr(debug_) {
+        if constexpr(verbose_) {
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
         }
@@ -572,7 +577,7 @@ private:
             lrefs[x] = std::make_unique<std::vector<Ref>>();
         }
 
-        if constexpr(debug_) {
+        if constexpr(verbose_) {
             std::cout << "factorize ... ";
             std::cout.flush();
             phase.start();
@@ -732,13 +737,13 @@ private:
             lrefs[x]->shrink_to_fit();
         }
 
-        if constexpr(debug_) {
+        if constexpr(verbose_) {
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
             std::cout << "\tpreliminary refs: " << max_refs << std::endl;
         }
 
-        if constexpr(debug_) {
+        if constexpr(verbose_) {
             std::cout << "emit ... ";
             std::cout.flush();
             phase.start();
@@ -821,7 +826,7 @@ private:
             emit_current_gap();
         }
         
-        if constexpr(debug_) {
+        if constexpr(verbose_) {
             phase.stop();
             std::cout << "(" << (size_t)phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms, peak mem " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
 
