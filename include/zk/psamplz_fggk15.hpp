@@ -14,7 +14,6 @@
 #include <ankerl/unordered_dense.h>
 
 #include "internal/benchmark.hpp"
-#include "internal/io/memory_input_stream.hpp"
 #include "internal/io/vbyte_coding.hpp"
 #include "internal/sketch/bloom_filter.hpp"
 #include "internal/util/concurrent_map.hpp"
@@ -341,34 +340,6 @@ public:
     PSampLZ_FGGK15& operator=(PSampLZ_FGGK15&&) = default;
     PSampLZ_FGGK15(PSampLZ_FGGK15 const&) = default;
     PSampLZ_FGGK15& operator=(PSampLZ_FGGK15 const&) = default;
-
-    template<std::contiguous_iterator Input, std::output_iterator<lz77::Factor> Output>
-    requires (sizeof(std::iter_value_t<Input>) == 1)
-    void factorize(Input begin, Input const& end, Output out) {
-        // parse
-        std::string_view s(begin, end);
-        size_t const n = s.size();
-        internal::MemoryInputStream in(s.data(), n);
-        auto refs = parse(in, n);
-
-        // factorize
-        size_t i = 0;
-        for(auto it = refs.begin(); i < n && it != refs.end(); it++) {
-            // create literal factors up to the next reference
-            for(; i < it->pos; i++) {
-                *out++ = lz77::Factor(s[i]);
-            }
-
-            // create reference
-            *out++ = lz77::Factor(i - it->src, it->len);
-            i += it->len;
-        }
-
-        // create literal factors for the remaining literals
-        for(; i < n; i++) {
-            *out++ = lz77::Factor(s[i]);
-        }
-    }
 
     template<iopp::STLInputStreamLike InputStream, iopp::STLOutputStreamLike OutputStream>
     requires requires(InputStream& subject, size_t const offs, std::ios_base::seekdir const dir){
