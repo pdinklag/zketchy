@@ -18,13 +18,12 @@
 #include <fp/rk31.hpp>
 #include <fp/rk61.hpp>
 #include <ankerl/unordered_dense.h>
+#include <iopp/util/overlapping_blocks.hpp>
 
 #include <libsais.h>
 #include <libsais64.h>
 
 #include "internal/benchmark.hpp"
-#include "internal/io/memory_input_stream.hpp"
-#include "internal/io/overlapping_blocks.hpp"
 #include "internal/util/idiv_ceil.hpp"
 #include "internal/util/si_iec_literals.hpp"
 
@@ -154,14 +153,14 @@ private:
 
             std::vector<std::unique_ptr<std::vector<Metachar>>> pre_parsing;
 
-            internal::OverlappingBlocks<InputStream> block;
+            iopp::OverlappingBlocks<InputStream> block;
             bool done;
             if constexpr(has_text_access) {
                 // we only scan one "block" - the whole input
                 done = true;
             } else {
                 // we will process the input blockwise
-                block = internal::OverlappingBlocks(in, block_size, fp_window_);
+                block = iopp::OverlappingBlocks(in, block_size, fp_window_);
             }
 
             // when the last thread reaches the end of a block (not the last) and has not yet found a trigger string,
@@ -854,6 +853,13 @@ public:
             // define types for overlapping blocks to compile
             using char_type = char;
             using int_type = int;
+
+            bool good() const { return false; }
+            operator bool() const { return false; }
+            size_t gcount() const { return 0; }
+            char get() { return 0; }
+            size_t tellg() { return 0; }
+            void read(char*, size_t) {}
         };
         NoStream no_stream;
         factorize<NoStream, Emitter, true>(no_stream, 0, t, n, emitter);

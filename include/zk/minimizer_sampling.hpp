@@ -7,8 +7,8 @@
 #include <ankerl/unordered_dense.h>
 #include <fp/rk31.hpp>
 #include <iopp/concepts.hpp>
+#include <iopp/util/overlapping_blocks.hpp>
 
-#include "internal/io/overlapping_blocks.hpp"
 #include "internal/util/si_iec_literals.hpp"
 
 namespace zk {
@@ -184,7 +184,7 @@ public:
         bool last_block_was_skipped = false;
 
         // initialize I/O
-        zk::internal::OverlappingBlocks block(in, buffer_size, fp_window_);
+        iopp::OverlappingBlocks block(in, buffer_size, fp_window_);
         if(block.size() < fp_window_) std::abort();
         char const* p = block.begin();
 

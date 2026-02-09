@@ -8,11 +8,11 @@
 #include <omp.h>
 
 #include <fp/rk61.hpp>
+#include <iopp/util/overlapping_blocks.hpp>
 #include <lz77/factor.hpp>
 
 #include "internal/benchmark.hpp"
 #include "internal/io/memory_input_stream.hpp"
-#include "internal/io/overlapping_blocks.hpp"
 #include "internal/io/vbyte_coding.hpp"
 #include "internal/sketch/bloom_filter.hpp"
 #include "internal/util/concurrent_map.hpp"
@@ -142,7 +142,7 @@ private:
         {
             internal::TimePhase phase_sample_and_parse("sample and parse");
             phase_sample_and_parse.start();
-            internal::OverlappingBlocks<InputStream> block(window_size, len_max);
+            iopp::OverlappingBlocks<InputStream> block(window_size, len_max);
 
             for(size_t l1 = num_lens; l1 > 0; l1--) {
                 auto const l = l1 - 1;

@@ -8,13 +8,13 @@
 #include <omp.h>
 
 #include <fp/rk61.hpp>
+#include <iopp/util/overlapping_blocks.hpp>
 #include <lz77/factor.hpp>
 
 #include <ankerl/unordered_dense.h>
 
 #include "internal/benchmark.hpp"
 #include "internal/io/memory_input_stream.hpp"
-#include "internal/io/overlapping_blocks.hpp"
 #include "internal/io/vbyte_coding.hpp"
 #include "internal/sketch/bloom_filter.hpp"
 #include "internal/util/concurrent_map.hpp"
@@ -196,7 +196,7 @@ private:
                 phase.start();
 
                 in.seekg(0, std::ios_base::beg);
-                internal::OverlappingBlocks<InputStream> block(window_size, len);
+                iopp::OverlappingBlocks<InputStream> block(window_size, len);
 
                 auto init_fingerprinting = [&](size_t const thread_num, size_t const num_per_thread){
                     // compute window part boundaries
