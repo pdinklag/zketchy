@@ -2,13 +2,13 @@ add_library(zk-cscore INTERFACE)
 target_link_libraries(zk-cscore INTERFACE fp iopp unordered_dense pm-malloc)
 
 add_library(zk-psamplz INTERFACE)
-target_link_libraries(zk-psamplz INTERFACE ${TBB_LIBRARIES} fp growt iopp lz77 unordered_dense word-packing pm-malloc)
+target_link_libraries(zk-psamplz INTERFACE fp growt iopp lz77 unordered_dense word-packing pm-malloc tbb)
 
 add_library(zk-topk-lz77 INTERFACE)
-target_link_libraries(zk-topk-lz77 INTERFACE ${TBB_LIBRARIES} code fp iopp lz77 unordered_dense pm-malloc)
+target_link_libraries(zk-topk-lz77 INTERFACE alz code fp iopp unordered_dense pm-malloc tbb)
 
 add_library(zk-topk-lz78 INTERFACE)
-target_link_libraries(zk-topk-lz78 INTERFACE ${TBB_LIBRARIES} code iopp pm-malloc)
+target_link_libraries(zk-topk-lz78 INTERFACE code iopp pm-malloc tbb)
 
 add_subdirectory(tools)
 

@@ -1,8 +1,7 @@
 #pragma once
 
+#include <alz/approximate_lz77.hpp>
 #include <lz77/lpf_factorizer.hpp>
-
-#include "approximate_lz77.hpp"
 
 #include "internal/benchmark.hpp"
 #include "internal/io/block_coding.hpp"
@@ -146,7 +145,7 @@ public:
                     };
 
                     if(lz_sampling_ > 0) {
-                        ApproximateLZ77<Index> alz(lz_sampling_, 16);
+                        alz::ApproximateLZ77<Index> alz(lz_sampling_, 16);
                         alz.factorize(block.get(), block.get() + block_num, emit_literal, emit_ref);
                     } else {
                         lz77::LPFFactorizer lpf;

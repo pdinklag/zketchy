@@ -1,7 +1,3 @@
-add_executable(alz-tool alz_tool.cpp)
-target_link_libraries(alz-tool ${TBB_LIBRARIES} code fp iopp lz77 pm-malloc cmdline unordered_dense)
-set_target_properties(alz-tool PROPERTIES OUTPUT_NAME "alz")
-
 add_executable(cscore-tool cscore_tool.cpp)
 target_link_libraries(cscore-tool zk-cscore cmdline)
 set_target_properties(cscore-tool PROPERTIES OUTPUT_NAME "cscore")

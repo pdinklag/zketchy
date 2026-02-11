@@ -25,11 +25,30 @@ if(${BENCHMARK})
     add_compile_definitions(BENCHMARK)
 endif()
 
-# init git submodules
-include(InitGitSubmodules)
+# dependencies
+include(cmake/CPM.cmake)
+CPMAddPackage("gh:martinus/unordered_dense#v4.8.1")
+CPMAddPackage(
+    URI "gh:TooBiased/growt#master"
+    DOWNLOAD_ONLY YES)
 
-# extlib
-add_subdirectory(extlib)
+CPMAddPackage("gh:pdinklag/cmdline#v1.0.0")
+CPMAddPackage("gh:pdinklag/code#v1.0.0")
+CPMAddPackage("gh:pdinklag/fp#v1.0.0")
+CPMAddPackage("gh:pdinklag/iopp#v1.0.0")
+CPMAddPackage("gh:pdinklag/pm#v1.0.0")
+CPMAddPackage("gh:pdinklag/word-packing#v1.0.0")
+
+CPMAddPackage(
+    NAME alz
+    GIT_REPOSITORY "git@github.com:pdinklag/alz.git"
+    GIT_TAG "v1.0.0"
+)
+
+CPMAddPackage("gh:pdinklag/lz77#v1.0.0")
+
+add_library(growt INTERFACE)
+target_include_directories(growt INTERFACE ${growt_SOURCE_DIR})
 
 # include
 include_directories(${CMAKE_SOURCE_DIR}/include)
