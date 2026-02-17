@@ -206,11 +206,13 @@ public:
         size_t next_mandatory = max_sample_len_;
 
         do {
-            if(block.empty()) continue;
-
             if(skip_probability > 0 && dist(r) < skip_probability) {
                 last_block_was_skipped = true;
             } else {
+                if(!block.first()) {
+                    p = block.begin();
+                }
+
                 if(last_block_was_skipped) {
                     // re-initialize fingerprint
                     fp = 0;
@@ -240,11 +242,7 @@ public:
                     ++p;
                 }
             }
-
-            // advance block
-            block.advance();
-            p = block.begin();
-        } while(!block.empty());
+        } while(block.advance());
 
         samples.back().len = i - samples.back().index;
         return samples;
