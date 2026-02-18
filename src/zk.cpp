@@ -1,5 +1,6 @@
-#include <zk/cscore.hpp>
-#include <zk/psamplz.hpp>
+#include <cmath>
+
+#include <alz/approximate_lz77.hpp>
 #include <zk/topk_lz77.hpp>
 
 #include <iopp/bitwise_io.hpp>
@@ -11,32 +12,25 @@
 #include <zk/internal/benchmark.hpp>
 #include <zk/internal/util/si_iec_literals.hpp>
 
+#include <zk/internal/io/vbyte_coding.hpp>
+
 class ZK : public cmdline::Program {
 private:
     std::string filename;
     size_t memory = 0;
-    double psamplz_window_ratio = 0.1;
-    double cscore_window_ratio = 0.1;
+    double alz_threshold = 0.3;
+    double alz_block_ratio = 0.05;
     double topk_lz77_window_ratio = 0.75;
     bool decompress = false;
-
-    bool flag_topk_sampled = false;
-    bool flag_topk_lz77 = false;
-    bool flag_psamplz_topk_sampled = false;
-    bool flag_psamplz_topk_lz77 = false;
 
 public:
     ZK() : cmdline::Program("zketchy compression utility", "Compresses the input") {
         required_arg("file", filename, "The input file.");
         option('d', "decompress", decompress, "Decompress the input file rather than compressing it.");
         option('m', "memory", memory, "The memory limit.");
-        option('c', "cscore-window-ratio", cscore_window_ratio, "The ratio of memory to use for the window in cscore.");
-        option('y', "psamplz-window-ratio", psamplz_window_ratio, "The ratio of memory to use for the window in psamplz.");
-        option('x', "topk-lz77-window-ratio", topk_lz77_window_ratio, "The ratio of memory to use for the window in topk-lz77.");
-        option('1', "topk-sampled", flag_topk_sampled, "Straight up go to topk-lz77 with sampled LZ77.");
-        option('2', "topk-lz77", flag_topk_lz77, "Straight up go to topk-lz77 with exact LZ77.");
-        option('3', "psamplz-topk-sampled", flag_psamplz_topk_sampled, "psamplz + topk-lz77 with sampled LZ77.");
-        option('4', "psamplz-topk-lz77", flag_psamplz_topk_lz77, "psamplz + topk-lz77 with exact LZ77.");
+        option('a', "alz-threshold", alz_threshold, "Do precompression only if metacharacter cardinality falls below this ratio.");
+        option('x', "alz-block-ratio", alz_block_ratio, "The ratio of memory to use for the blocks in alz.");
+        option('y', "topk-lz77-window-ratio", topk_lz77_window_ratio, "The ratio of memory to use for the window in topk-lz77.");
     }
 
     virtual int main() override {
@@ -44,109 +38,160 @@ public:
         if(decompress) {
 
         } else {
-            iopp::FileInputStream in(filename);
-
             // determine parameters respecting the given memory limit
             if(memory == 0) {
                 memory = n; // by default, never use more memory than the input size
             }
             std::cout << "zk on " << filename << " with memory constrained to " << memory << " bytes" << std::endl;
 
-            auto precompress = false;
-            auto strong_lz77 = false;
-            size_t len_exp_min, len_exp_max;
+            iopp::FileInputStream in(filename);
 
-            if(flag_topk_sampled) {
-                precompress = false;
-                strong_lz77 = false;
-            } else if(flag_topk_lz77) {
-                precompress = false;
-                strong_lz77 = true;
-            } else if(flag_psamplz_topk_sampled) {
-                precompress = true;
-                strong_lz77 = false;
-                len_exp_min = 10;
-                len_exp_max = 14;
-            } else if(flag_psamplz_topk_lz77) {
-                precompress = true;
-                strong_lz77 = true;
-                len_exp_min = 10;
-                len_exp_max = 14;
-            } else {
-                // determine configuration based on a compressibility score
-                double score;
-                {
-                    static constexpr size_t cscore_bytes_per_w = 1;
-                    static constexpr size_t cscore_num_minimizers = 8;
-                    static constexpr size_t cscore_len = 8;
-                    static constexpr size_t cscore_bytes_per_sample = 150;
-                    static constexpr size_t cscore_window_max = 64_Mi;
-                    static constexpr size_t cscore_sampling_min = 16_Ki;
-                    static constexpr size_t cscore_ref_size = 16_Ki;
+            // alz precompression
+            bool precompress;
+            auto tmp_filename = filename + ".zk_tmp";
+            {
+                constexpr size_t alz_min_sampling = 6;
+                constexpr size_t alz_max_sampling = 10;
+                constexpr size_t const alz_fp_window = 10;
+                constexpr size_t const alz_block_size_max = 16 * 1024 * 1024;
 
-                    double const mem_window = cscore_window_ratio * double(memory);
-                    size_t const w = std::min(cscore_window_max, size_t(cscore_bytes_per_w * mem_window));
-                    size_t const mem_samples = memory - w * cscore_bytes_per_w;
-                    double const max_samples = double(mem_samples) / double(cscore_bytes_per_sample);
-                    size_t const cscore_sampling = std::max(cscore_sampling_min, size_t(double(n) / max_samples));
-                    double const cscore_skip = std::min(0.85, 1.0 - std::min(1.0, double(cscore_ref_size) / std::sqrt(double(n))));
-
-                    std::cout << "cscore (s=" << cscore_sampling << ", w=" << w << ", skip=" << cscore_skip << ") ... "; std::cout.flush();
+                bool const use_64bit = (n >= 4_Gi);
+                size_t const sizeof_index = use_64bit ? 8 : 4;
+                size_t const sizeof_metachar = 12 + sizeof_index;
+                size_t const alz_block_size = std::min(alz_block_size_max, size_t(alz_block_ratio * memory));
+                
+                // first coarse estimation of the required sampling to be able to do anything
+                size_t const alz_initial_sampling = std::max(alz_min_sampling, size_t(std::ceil(1.0 + std::log2(double(n * sizeof_metachar) / double(memory - alz_block_size)))));
+                size_t alz_sampling = alz_initial_sampling;
+                if(alz_sampling <= alz_max_sampling) {
+                    std::cout << "alz<" << (use_64bit ? "64" : "32") << "> -s " << alz_sampling << " -l " << alz_fp_window << " -w " << alz_block_size << " ..." << std::endl;
 
                     zk::internal::MemoryTimePhase phase;
+
                     phase.start();
-                    score = zk::CScore(cscore_sampling, cscore_len, cscore_num_minimizers, w, cscore_skip).compute(in);
+                    {                
+                        iopp::FileOutputStream out(tmp_filename);
+
+                        auto estimate_memory = [&](size_t const parsing, size_t const card){
+                            return alz_block_size + parsing * (sizeof_metachar + 2 * sizeof_index) + (1ULL << (alz_sampling + 1)) * card;
+                        };
+
+                        auto pre_parse_callback = [&](size_t parsing, size_t card){
+                            size_t est_mem = estimate_memory(parsing, card);
+                            double card_ratio = double(card) / double(parsing);
+                            double est_mem_ratio = double(est_mem) / double(memory);
+                            std::cout << "\tparsing=" << parsing;
+                            std::cout << ", est_card=" << card << " (" << 100.0 * card_ratio << "%)";
+                            std::cout << " -> est_mem=" << est_mem << " (" << 100.0 * est_mem_ratio << "% of limit)";
+                            std::cout << std::endl;
+
+                            if(card_ratio <= alz_threshold) {
+                                precompress = true;
+
+                                while(estimate_memory(parsing*2, card/2) < 0.8 * memory && alz_sampling > alz_min_sampling) {
+                                    --alz_sampling;
+                                    card /= 2;
+                                    parsing *= 2;
+                                    est_mem = estimate_memory(parsing, card);
+                                    precompress = false;
+                                }
+
+                                while(est_mem > 0.8 * memory && alz_sampling <= alz_max_sampling) {
+                                    ++alz_sampling;
+                                    card *= 2;
+                                    parsing /= 2;
+                                    est_mem = estimate_memory(parsing, card);
+                                    precompress = false;
+                                }
+
+                                if(alz_sampling == alz_initial_sampling - 1) {
+                                    // don't waste time on shoving off a sub-percent in precompression
+                                    std::cout << "\tnot retrying with -s " << alz_sampling << " by heuristic" << std::endl;
+                                    alz_sampling = alz_initial_sampling;
+                                    precompress = true;
+                                }
+
+                                if(!precompress) {
+                                    if(alz_sampling > alz_max_sampling) {
+                                        std::cout << "\tmemory limit too low" << std::endl;
+                                    } else {
+                                        double est_mem_ratio = double(est_mem) / double(memory);
+                                        std::cout << "\tretrying with -s " << alz_sampling << " -> est_mem=" << est_mem << " (" << 100.0 * est_mem_ratio << "% of limit) ..." << std::endl;
+                                    }
+                                }
+                            } else {
+                                std::cout << "\tscore too low" << std::endl;
+                                precompress = false;
+                            }
+                            return precompress;
+                        };
+
+                        auto emit_literal = [&](lz77::Factor f){
+                            zk::internal::encode_vbyte(out, 0);
+                            out.put(f.literal());
+                        };
+
+                        auto emit_copy = [&](lz77::Factor f){
+                            zk::internal::encode_vbyte(out, f.len);
+                            zk::internal::encode_vbyte(out, f.src);
+                        };
+
+                        auto run_alz = [&](auto alz, bool callback){
+                            if(callback) {
+                                alz.pre_parse_callback = pre_parse_callback;
+                            }
+                            alz.factorize(in, n, alz_block_size, emit_literal, emit_copy);
+                        };
+                        
+                        // attempt #1
+                        if(use_64bit) {
+                            // 64-bit
+                            run_alz(alz::ApproximateLZ77<uint64_t>(alz_sampling, alz_fp_window), true);
+                        } else {
+                            // 32-bit
+                            run_alz(alz::ApproximateLZ77<uint32_t>(alz_sampling, alz_fp_window), true);
+                        }
+
+                        if(!precompress && alz_sampling != alz_initial_sampling && alz_sampling <= alz_max_sampling) {
+                            // attempt #2
+                            in.seekg(0, std::ios::beg);
+                            if(use_64bit) {
+                                // 64-bit
+                                run_alz(alz::ApproximateLZ77<uint64_t>(alz_sampling, alz_fp_window), false);
+                            } else {
+                                // 32-bit
+                                run_alz(alz::ApproximateLZ77<uint32_t>(alz_sampling, alz_fp_window), false);
+                            }
+                            precompress = true;
+                        }
+                    }
                     phase.stop();
 
-                    std::cout << "time=" << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", mem=" << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ", score=" << score << std::endl;
-                }
-
-                if(score < 0.25) {
-                    precompress = true;
-                    if(score < 0.025) {
-                        len_exp_min = 10;
-                        len_exp_max = 12;
-                    } else {
-                        len_exp_min = 12;
-                        len_exp_max = 12;
+                    auto const time = phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>();
+                    auto const mem = phase.get_metric<pm::MallocCounter::MemoryPeakMetric>();
+                    auto const mratio = double(mem) / double(memory);
+                    std::cout << "time=" << time << ", mem=" << mem << " (" << 100.0 * mratio << " % of limit)";
+                    if(precompress) {
+                        auto const nout = std::filesystem::file_size(tmp_filename);
+                        auto const cratio = double(nout) / double(n);
+                        std::cout << ", nout=" << nout << " (" << 100.0 * cratio << "% of input)";
                     }
-                } else if(score > 0.75) {
-                    strong_lz77 = true;
+                    std::cout << std::endl;
+
+                    if(!precompress) {
+                        std::filesystem::remove(tmp_filename);
+                        tmp_filename = filename;
+                    }
+                } else {
+                    precompress = false;
+                    std::cout << "skipping precompression -- memory limit too low" << std::endl;
                 }
             }
 
-            // psamplz
-            in.seekg(0, std::ios_base::beg);
-
-            auto const tmp_filename = precompress ? filename + ".zk_tmp" : filename;
-            if(precompress) {
-                static constexpr size_t psamplz_bytes_per_fp = 72;
-                static constexpr size_t psamplz_window_max = 64_Mi;
-                static constexpr size_t psamplz_bytes_per_w = 1;
-                static constexpr size_t psamplz_bloom_scale = 6UL;
-
-                double const mem_window = psamplz_window_ratio * double(memory);
-                size_t const w = std::min(psamplz_window_max, size_t(psamplz_bytes_per_w * mem_window));
-                size_t const mem_fp = memory - w * psamplz_bytes_per_w;
-                size_t const psamplz_sampling = size_t(std::ceil(std::log2(size_t(double(psamplz_bytes_per_fp * n) / double(mem_fp)))));
-                
-                std::cout << "psamplz (s=" << psamplz_sampling << ", w=" << w << ", min=" << len_exp_min << ", max=" << len_exp_max << ") ... "; std::cout.flush();
-
-                zk::internal::MemoryTimePhase phase;
-                phase.start();
-                {
-                    iopp::FileOutputStream out_tmp(tmp_filename);
-                    zk::PSampLZ psamplz(len_exp_min, len_exp_max, psamplz_sampling, psamplz_bloom_scale, w);
-                    psamplz.compress(in, n, out_tmp);
-                }
-                phase.stop();
-                auto const nout = std::filesystem::file_size(tmp_filename);
-                auto const cratio = 100.0 * double(nout) / double(n);
-                std::cout << "time=" << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", mem=" << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ", nout=" << nout << " (" << cratio << "%)" << std::endl;
-            }
 
             // topk-lz77
             {
+                /*
                 static constexpr size_t topk_lz_sampling_weak = 4;
                 static constexpr size_t topk_lz_sampling_strong = 0;
                 static constexpr size_t topk_bytes_per_k = 59;
@@ -177,11 +222,12 @@ public:
                 auto const nout = std::filesystem::file_size(out_filename);
                 auto const cratio = 100.0 * double(nout) / double(n);
                 std::cout << "time=" << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", mem=" << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ", nout=" << nout << " (" << cratio << "%)" << std::endl;
+                */
             }
 
             // clean up
             if(precompress) {
-                std::filesystem::remove(tmp_filename);
+                // std::filesystem::remove(tmp_filename);
             }
         }
         return 0;

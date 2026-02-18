@@ -42,7 +42,7 @@ CPMAddPackage("gh:pdinklag/word-packing#v1.0.0")
 CPMAddPackage(
     NAME alz
     GIT_REPOSITORY "git@github.com:pdinklag/alz.git"
-    GIT_TAG "v1.0.0"
+    GIT_TAG "experimental"
 )
 
 CPMAddPackage("gh:pdinklag/lz77#v1.0.0")

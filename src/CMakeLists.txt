@@ -13,4 +13,4 @@ target_link_libraries(zk-topk-lz78 INTERFACE code iopp pm-malloc tbb)
 add_subdirectory(tools)
 
 add_executable(zk zk.cpp)
-target_link_libraries(zk zk-cscore zk-psamplz zk-topk-lz77 cmdline)
+target_link_libraries(zk alz zk-topk-lz77 cmdline)
