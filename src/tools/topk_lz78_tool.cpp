@@ -2,7 +2,6 @@
 #include <zk/internal/util/si_iec_literals.hpp>
 
 #include <cmdline/program.hpp>
-#include <iopp/bitwise_io.hpp>
 #include <iopp/file_input_stream.hpp>
 #include <iopp/file_output_stream.hpp>
 
@@ -36,7 +35,7 @@ public:
 
             iopp::FileInputStream in(filename);
             iopp::FileOutputStream out(output_filename);
-            zk::TopkLZ78::decompress(iopp::bitwise_input_from(in), out);
+            zk::TopkLZ78::decompress(in, out);
         } else {
             size_t const n = std::min(std::filesystem::file_size(filename), prefix);
 
@@ -48,7 +47,7 @@ public:
             {
                 iopp::FileInputStream in(filename, 0, n);
                 iopp::FileOutputStream out(output_filename);
-                topk_lz78.compress(in, iopp::bitwise_output_to(out));
+                topk_lz78.compress(in, out);
             }
 
             auto result = topk_lz78.consume_last_result();

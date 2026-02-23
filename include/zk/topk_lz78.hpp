@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iopp/bitwise_io.hpp>
 #include <iopp/stream_input_iterator.hpp>
 #include <iopp/stream_output_iterator.hpp>
 
@@ -61,8 +62,8 @@ public:
     TopkLZ78(TopkLZ78 const&) = default;
     TopkLZ78& operator=(TopkLZ78 const&) = default;
 
-    template<iopp::STLInputStreamLike InputStream, iopp::BitSink Out>
-    void compress(InputStream& in, Out out) {
+    template<iopp::STLInputStreamLike InputStream, iopp::STLOutputStreamLike OutputStream>
+    void compress(InputStream& in, OutputStream& outs) {
         // init stats
         internal::MemoryTimePhase stats("topk-lz78");
         size_t longest = 0;
@@ -72,6 +73,7 @@ public:
         stats.start();
 
         // write header and initialize encoding
+        auto out = iopp::bitwise_output_to(outs);
         out.write(MAGIC, 64);
         out.write(k_, 64);
         out.write(max_freq_, 64);
@@ -122,11 +124,12 @@ public:
         result_.add("mem_peak", stats.get_metric<pm::MallocCounter::MemoryPeakMetric>());
     }
 
-    template<iopp::BitSource In, iopp::STLOutputStreamLike OutputStream>
-    static void decompress(In in, OutputStream& outs) {
+    template<iopp::STLInputStreamLike InputStream, iopp::STLOutputStreamLike OutputStream>
+    static void decompress(InputStream& ins, OutputStream& outs) {
         iopp::StreamOutputIterator out(outs);
 
         // decode header
+        auto in = iopp::bitwise_input_from(ins);
         uint64_t const magic = in.read(64);
         if(magic != MAGIC) {
             std::cerr << "wrong magic: 0x" << std::hex << magic << " (expected: 0x" << MAGIC << ")" << std::endl;
