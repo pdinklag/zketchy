@@ -199,7 +199,7 @@ public:
                 static constexpr size_t topk_lz_sampling_strong = 0;
                 static constexpr size_t topk_bytes_per_k = 58;
                 static constexpr double topk_bytes_per_w_weak = 3.75;
-                static constexpr double topk_bytes_per_w_strong = 9;
+                static constexpr double topk_bytes_per_w_strong = 12;
                 static constexpr size_t topk_window_max = 2_Gi - 1; // nb: never go beyond 31-bit
 
                 double const mem_window = topk_lz77_window_ratio * double(memory);
@@ -224,7 +224,11 @@ public:
 
                 auto const nout = std::filesystem::file_size(out_filename);
                 auto const cratio = 100.0 * double(nout) / double(n);
-                std::cout << "time=" << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", mem=" << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ", nout=" << nout << " (" << cratio << "%)" << std::endl;
+
+                auto const time = phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>();
+                auto const mem = phase.get_metric<pm::MallocCounter::MemoryPeakMetric>();
+                auto const mratio = double(mem) / double(memory);
+                std::cout << "time=" << time << ", mem=" << mem << " (" << 100.0 * mratio << " % of limit)" << ", nout=" << nout << " (" << 100.0 * cratio << "% of input)" << std::endl;
             }
 
             // clean up
