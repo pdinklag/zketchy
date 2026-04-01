@@ -197,9 +197,9 @@ public:
             {
                 static constexpr size_t topk_lz_sampling_weak = 4;
                 static constexpr size_t topk_lz_sampling_strong = 0;
-                static constexpr size_t topk_bytes_per_k = 59;
+                static constexpr size_t topk_bytes_per_k = 58;
                 static constexpr double topk_bytes_per_w_weak = 3.75;
-                static constexpr double topk_bytes_per_w_strong = 12;
+                static constexpr double topk_bytes_per_w_strong = 9;
                 static constexpr size_t topk_window_max = 2_Gi - 1; // nb: never go beyond 31-bit
 
                 double const mem_window = topk_lz77_window_ratio * double(memory);
