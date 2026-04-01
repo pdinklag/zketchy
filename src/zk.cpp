@@ -21,6 +21,7 @@ private:
     double alz_threshold = 0.3;
     double alz_block_ratio = 0.05;
     double topk_lz77_window_ratio = 0.75;
+    bool disable_precompression = false;
     bool decompress = false;
 
 public:
@@ -31,6 +32,7 @@ public:
         option('a', "alz-threshold", alz_threshold, "Do precompression only if metacharacter cardinality falls below this ratio.");
         option('x', "alz-block-ratio", alz_block_ratio, "The ratio of memory to use for the blocks in alz.");
         option('y', "topk-lz77-window-ratio", topk_lz77_window_ratio, "The ratio of memory to use for the window in topk-lz77.");
+        option("disable-precompression", disable_precompression, "Completely disable precompression.");
     }
 
     virtual int main() override {
@@ -47,9 +49,9 @@ public:
             iopp::FileInputStream in(filename);
 
             // alz precompression
-            bool precompress;
+            bool precompress = false;
             auto tmp_filename = filename + ".zk_tmp";
-            {
+            if(!disable_precompression) {
                 constexpr size_t alz_min_sampling = 6;
                 constexpr size_t alz_max_sampling = 10;
                 constexpr size_t const alz_fp_window = 10;
@@ -180,7 +182,6 @@ public:
 
                     if(!precompress) {
                         std::filesystem::remove(tmp_filename);
-                        tmp_filename = filename;
                     }
                 } else {
                     precompress = false;
@@ -188,10 +189,12 @@ public:
                 }
             }
 
-
+            if(!precompress) {
+                tmp_filename = filename;
+            }
+            
             // topk-lz77
             {
-                /*
                 static constexpr size_t topk_lz_sampling_weak = 4;
                 static constexpr size_t topk_lz_sampling_strong = 0;
                 static constexpr size_t topk_bytes_per_k = 59;
@@ -200,8 +203,8 @@ public:
                 static constexpr size_t topk_window_max = 2_Gi - 1; // nb: never go beyond 31-bit
 
                 double const mem_window = topk_lz77_window_ratio * double(memory);
-                size_t const sampling = strong_lz77 ? topk_lz_sampling_strong : topk_lz_sampling_weak;
-                double const topk_bytes_per_w = strong_lz77 ? topk_bytes_per_w_strong : topk_bytes_per_w_weak;
+                size_t const sampling = topk_lz_sampling_strong;
+                double const topk_bytes_per_w = topk_bytes_per_w_strong;
                 size_t const w = std::min(topk_window_max, size_t(mem_window / topk_bytes_per_w));
                 size_t const k = size_t(double(memory - w * topk_bytes_per_w) / double(topk_bytes_per_k));
 
@@ -222,7 +225,6 @@ public:
                 auto const nout = std::filesystem::file_size(out_filename);
                 auto const cratio = 100.0 * double(nout) / double(n);
                 std::cout << "time=" << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", mem=" << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ", nout=" << nout << " (" << cratio << "%)" << std::endl;
-                */
             }
 
             // clean up
