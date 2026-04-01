@@ -223,7 +223,7 @@ public:
                 phase.stop();
 
                 auto const nout = std::filesystem::file_size(out_filename);
-                auto const cratio = 100.0 * double(nout) / double(n);
+                auto const cratio = double(nout) / double(n);
 
                 auto const time = phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>();
                 auto const mem = phase.get_metric<pm::MallocCounter::MemoryPeakMetric>();
