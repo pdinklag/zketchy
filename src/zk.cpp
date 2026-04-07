@@ -202,10 +202,11 @@ public:
                 static constexpr double topk_bytes_per_w_strong = 12;
                 static constexpr size_t topk_window_max = 2_Gi - 1; // nb: never go beyond 31-bit
 
+                auto const tmp_n = std::filesystem::file_size(tmp_filename);
                 double const mem_window = topk_lz77_window_ratio * double(memory);
                 size_t const sampling = topk_lz_sampling_strong;
                 double const topk_bytes_per_w = topk_bytes_per_w_strong;
-                size_t const w = std::min(topk_window_max, size_t(mem_window / topk_bytes_per_w));
+                size_t const w = std::min(tmp_n, std::min(topk_window_max, size_t(mem_window / topk_bytes_per_w)));
                 size_t const k = size_t(double(memory - w * topk_bytes_per_w) / double(topk_bytes_per_k));
 
                 std::cout << "topk-lz77 (k=" << k << ", w=" << w << ", s=" << sampling << ") ... "; std::cout.flush();
