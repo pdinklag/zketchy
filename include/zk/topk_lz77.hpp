@@ -78,7 +78,7 @@ public:
     TopkLZ77& operator=(TopkLZ77 const&) = default;
 
     template<iopp::STLInputStreamLike InputStream, iopp::BitSink Out>
-    void compress(InputStream& in, Out out) {
+    size_t compress(InputStream& in, Out out) {
         // init stats
         internal::MemoryTimePhase stats("topk-lz77");
         internal::TimePhase phase_read;
@@ -291,6 +291,7 @@ public:
         result_.add("t_lz77", phase_block_lz77.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
         result_.add("t_process", phase_process.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>());
         result_.add("mem_peak", stats.get_metric<pm::MallocCounter::MemoryPeakMetric>());
+        return num_lz + num_literal + num_trie;
     }
 
     template<iopp::BitSource In, iopp::STLOutputStreamLike OutputStream>

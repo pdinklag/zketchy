@@ -214,12 +214,13 @@ public:
                 zk::internal::MemoryTimePhase phase;
                 auto const out_filename = filename + ".zk";
                 phase.start();
+                size_t z;
                 {
                     in = iopp::FileInputStream(tmp_filename);
                     iopp::FileOutputStream fout(out_filename);
                     
                     zk::TopkLZ77 topk_lz77(k, w, 1_Ki, sampling, 1, 32_Ki);
-                    topk_lz77.compress(in, iopp::bitwise_output_to(fout));
+                    z = topk_lz77.compress(in, iopp::bitwise_output_to(fout));
                 }
                 phase.stop();
 
@@ -229,7 +230,7 @@ public:
                 auto const time = phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>();
                 auto const mem = phase.get_metric<pm::MallocCounter::MemoryPeakMetric>();
                 auto const mratio = double(mem) / double(memory);
-                std::cout << "time=" << time << ", mem=" << mem << " (" << 100.0 * mratio << " % of limit)" << ", nout=" << nout << " (" << 100.0 * cratio << "% of input)" << std::endl;
+                std::cout << "time=" << time << ", mem=" << mem << " (" << 100.0 * mratio << " % of limit)" << ", z=" << z << ", nout=" << nout << " (" << 100.0 * cratio << "% of input)" << std::endl;
             }
 
             // clean up
