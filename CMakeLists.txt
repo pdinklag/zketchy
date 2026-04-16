@@ -3,7 +3,6 @@ project(zketchy)
 
 # options
 option(BENCHMARK "Compile performance benchmarking and statistics output" OFF)
-option(PSAMPLZ "Build psamplz" OFF)
 
 # include CMake modules
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmakemodules")
@@ -30,18 +29,11 @@ endif()
 include(cmake/CPM.cmake)
 CPMAddPackage("gh:martinus/unordered_dense#v4.8.1")
 
-if(${PSAMPLZ})
-    CPMAddPackage(
-        URI "gh:TooBiased/growt#master"
-        DOWNLOAD_ONLY YES)
-endif()
-
 CPMAddPackage("gh:pdinklag/cmdline#v1.0.0")
 CPMAddPackage("gh:pdinklag/code#v1.0.0")
 CPMAddPackage("gh:pdinklag/fp#v1.0.0")
 CPMAddPackage("gh:pdinklag/iopp#v1.0.0")
 CPMAddPackage("gh:pdinklag/pm#v1.0.0")
-CPMAddPackage("gh:pdinklag/word-packing#v1.0.0")
 
 CPMAddPackage("gh:pdinklag/alz#experimental")
 CPMAddPackage("gh:pdinklag/lz77#v1.0.0")
