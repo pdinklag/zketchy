@@ -38,9 +38,6 @@ CPMAddPackage("gh:pdinklag/pm#v1.0.0")
 CPMAddPackage("gh:pdinklag/alz#experimental")
 CPMAddPackage("gh:pdinklag/lz77#v1.0.0")
 
-add_library(growt INTERFACE)
-target_include_directories(growt INTERFACE ${growt_SOURCE_DIR})
-
 # include
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
