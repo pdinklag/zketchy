@@ -13,6 +13,9 @@ find_package(OpenMP REQUIRED)
 # TBB
 find_package(TBB REQUIRED)
 
+# options
+option(LIBSAIS_USE_OPENMP "Use OpenMP for parallelization" ON)
+
 # set C++ build flags
 set(CXX_STANDARD c++23)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -std=gnu++23 ${GCC_WARNINGS} ${OpenMP_CXX_FLAGS} -Wstringop-overflow=0")
@@ -35,8 +38,8 @@ CPMAddPackage("gh:pdinklag/fp#v1.0.0")
 CPMAddPackage("gh:pdinklag/iopp#v1.0.0")
 CPMAddPackage("gh:pdinklag/pm#v1.0.0")
 
+CPMAddPackage("gh:pdinklag/lz77#v1.0.1")
 CPMAddPackage("gh:pdinklag/alz#experimental")
-CPMAddPackage("gh:pdinklag/lz77#v1.0.0")
 
 # include
 include_directories(${CMAKE_SOURCE_DIR}/include)
