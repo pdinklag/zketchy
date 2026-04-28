@@ -56,6 +56,7 @@ public:
                 constexpr size_t alz_max_sampling = 10;
                 constexpr size_t const alz_fp_window = 10;
                 constexpr size_t const alz_block_size_max = 16 * 1024 * 1024;
+                size_t const alz_memory_headroom = size_t(0.8 * memory);
 
                 bool const use_64bit = (n >= 4_Gi);
                 size_t const sizeof_index = use_64bit ? 8 : 4;
@@ -90,7 +91,7 @@ public:
                             if(card_ratio <= alz_threshold) {
                                 precompress = true;
 
-                                while(estimate_memory(parsing*2, card/2) < 0.8 * memory && alz_sampling > alz_min_sampling) {
+                                while(estimate_memory(parsing*2, card/2) < alz_memory_headroom && alz_sampling > alz_min_sampling) {
                                     --alz_sampling;
                                     card /= 2;
                                     parsing *= 2;
@@ -98,7 +99,7 @@ public:
                                     precompress = false;
                                 }
 
-                                while(est_mem > 0.8 * memory && alz_sampling <= alz_max_sampling) {
+                                while(est_mem > alz_memory_headroom && alz_sampling <= alz_max_sampling) {
                                     ++alz_sampling;
                                     card *= 2;
                                     parsing /= 2;
