@@ -2,7 +2,7 @@
 #include <iopp/bitwise_io.hpp>
 #include <iopp/load_file.hpp>
 #include <iopp/file_output_stream.hpp>
-#include <lz77/lpf_factorizer.hpp>
+#include <lz77/kkp2_factorizer.hpp>
 #include <zk/internal/io/block_coding.hpp>
 #include <zk/internal/util/si_iec_literals.hpp>
 
@@ -90,7 +90,7 @@ public:
             std::vector<lz77::Factor> factors;
             {
                 auto s = iopp::load_file_str(filename, n);
-                lz77::LPFFactorizer lz77;
+                lz77::KKP2Factorizer lz77;
                 lz77.factorize(s.begin(), s.end(), std::back_inserter(factors));
             }
 

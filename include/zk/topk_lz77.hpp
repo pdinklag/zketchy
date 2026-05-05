@@ -1,7 +1,7 @@
 #pragma once
 
 #include <alz/approximate_lz77.hpp>
-#include <lz77/lpf_factorizer.hpp>
+#include <lz77/kkp2_factorizer.hpp>
 
 #include "internal/benchmark.hpp"
 #include "internal/io/block_coding.hpp"
@@ -148,8 +148,8 @@ public:
                         alz::ApproximateLZ77<Index> alz(lz_sampling_, 16);
                         alz.factorize(block.get(), block.get() + block_num, emit_literal, emit_ref);
                     } else {
-                        lz77::LPFFactorizer lpf;
-                        lpf.factorize(block.get(), block.get() + block_num, emit_literal, emit_ref);
+                        lz77::KKP2Factorizer lz77;
+                        lz77.factorize(block.get(), block.get() + block_num, emit_literal, emit_ref);
                     }
                 }
                 phase_block_lz77.pause();
