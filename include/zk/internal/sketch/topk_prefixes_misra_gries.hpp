@@ -92,10 +92,10 @@ public:
     inline TopKPrefixesMisraGries() : k_(0) {
     }
 
-    inline TopKPrefixesMisraGries(size_t const k, size_t const sketch_columns, size_t const fp_window_size = 8)
+    inline TopKPrefixesMisraGries(size_t const k, size_t const max_freq, size_t const fp_window_size = 8)
         : trie_(k),
           k_(k),
-          space_saving_(trie_.nodes(), 1, k_ - 1, sketch_columns - 1) {
+          space_saving_(trie_.nodes(), 1, k_ - 1, max_freq - 1) {
         
         // initialize all k nodes as orphans in trie
         trie_.fill();

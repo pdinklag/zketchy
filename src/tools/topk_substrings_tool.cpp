@@ -226,16 +226,11 @@ private:
             }
         }
 
-        phase.stop();
-        std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms" << std::endl;
-
-        std::cerr << "compute top-k substrings ... "; std::cerr.flush();
-        phase.start();
-
+        // enumerate
         StringFrequencyTable freqs(topk, k);
 
         phase.stop();
-        std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms (renormalizations: " << topk.num_renormalizations() << ")" << std::endl;
+        std::cerr << phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << "ms (renormalizations: " << topk.num_renormalizations() << ", peak memory: " << phase.get_metric<pm::MallocCounter::MemoryPeakMetric>() << ")" << std::endl;
 
         return freqs;
     }
