@@ -1,3 +1,7 @@
+add_executable(blockwise-lz77-tool blockwise_lz77_tool.cpp)
+target_link_libraries(blockwise-lz77-tool cmdline code iopp lz77 pm-malloc)
+set_target_properties(blockwise-lz77-tool PROPERTIES OUTPUT_NAME "blockwise-lz77")
+
 add_executable(lz77-tool lz77_tool.cpp)
 target_link_libraries(lz77-tool cmdline code iopp lz77 pm-malloc)
 set_target_properties(lz77-tool PROPERTIES OUTPUT_NAME "lz77")
