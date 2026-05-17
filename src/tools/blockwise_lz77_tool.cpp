@@ -34,7 +34,7 @@ private:
     std::string output_filename;
     bool decompress = false;
     
-    uint64_t window = 1_Mi;
+    uint64_t window = 64_Mi;
     size_t prefix = SIZE_MAX;
     uint64_t block_size = 32_Ki; // best value according to many many experiments
 
@@ -122,7 +122,7 @@ public:
 
                     if(current_window > 0) {
                         lz77::KKP2Factorizer lz77;
-                        lz77.factorize(block.get(), block.get() + window,
+                        lz77.factorize(block.get(), block.get() + current_window,
                             [&](lz77::Factor f){
                                 ++factors_total;
                                 enc.write_uint(TOK_REF_LEN, 0);
@@ -141,7 +141,11 @@ public:
             t.stop();
 
             if constexpr(zk::internal::do_benchmark) {
-                std::cout << "n=" << n << ", z=" << factors_total << ", t=" << t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() << ", m=" << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << std::endl;
+                std::cout << "n=" << n <<
+                    ", z=" << factors_total <<
+                    ", nout=" << std::filesystem::file_size(output_filename) <<
+                    ", t=" << t.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>() <<
+                    ", m=" << t.get_metric<pm::MallocCounter::MemoryPeakMetric>() << std::endl;
             }
         }
         return 0;
