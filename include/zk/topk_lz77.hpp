@@ -134,6 +134,7 @@ public:
             {
                 phase_block_lz77.resume();
                 lz_refs.clear();
+                lz_refs.shrink_to_fit(); // free the memory to avoid memory spikes
                 {
                     size_t i = 0;
                     auto emit_literal = [&](lz77::Factor){

@@ -38,7 +38,7 @@ CPMAddPackage("gh:pdinklag/fp#v1.0.0")
 CPMAddPackage("gh:pdinklag/iopp#v1.0.0")
 CPMAddPackage("gh:pdinklag/pm#v1.0.0")
 
-CPMAddPackage("gh:pdinklag/lz77#v1.0.2")
+CPMAddPackage("gh:pdinklag/lz77#v1.0.3")
 CPMAddPackage("gh:pdinklag/alz#experimental")
 
 # include
