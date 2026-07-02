@@ -173,7 +173,7 @@ public:
                     auto const time = phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>();
                     auto const mem = phase.get_metric<pm::MallocCounter::MemoryPeakMetric>();
                     auto const mratio = double(mem) / double(memory);
-                    std::cout << "time=" << time << ", mem=" << mem << " (" << 100.0 * mratio << " % of limit)";
+                    std::cout << "\ttime=" << time << ", mem=" << mem << " (" << 100.0 * mratio << " % of limit)";
                     if(precompress) {
                         auto const nout = std::filesystem::file_size(tmp_filename);
                         auto const cratio = double(nout) / double(n);
@@ -210,7 +210,7 @@ public:
                 size_t const w = std::min(tmp_n, std::min(topk_window_max, size_t(mem_window / topk_bytes_per_w)));
                 size_t const k = size_t(double(memory - w * topk_bytes_per_w) / double(topk_bytes_per_k));
 
-                std::cout << "topk-lz77 (k=" << k << ", w=" << w << ", s=" << sampling << ") ... "; std::cout.flush();
+                std::cout << "topk-lz77 (k=" << k << ", w=" << w << ", s=" << sampling << ") ... " << std::endl;
 
                 zk::internal::MemoryTimePhase phase;
                 auto const out_filename = filename + ".zk";
@@ -231,12 +231,12 @@ public:
                 auto const time = phase.get_metric<pm::Stopwatch::ElapsedTimeMillisMetric>();
                 auto const mem = phase.get_metric<pm::MallocCounter::MemoryPeakMetric>();
                 auto const mratio = double(mem) / double(memory);
-                std::cout << "time=" << time << ", mem=" << mem << " (" << 100.0 * mratio << " % of limit)" << ", z=" << z << ", nout=" << nout << " (" << 100.0 * cratio << "% of input)" << std::endl;
+                std::cout << "\ttime=" << time << ", mem=" << mem << " (" << 100.0 * mratio << " % of limit)" << ", z=" << z << ", nout=" << nout << " (" << 100.0 * cratio << "% of input)" << std::endl;
             }
 
             // clean up
             if(precompress) {
-                // std::filesystem::remove(tmp_filename);
+                std::filesystem::remove(tmp_filename);
             }
         }
         return 0;
