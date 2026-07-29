@@ -64,7 +64,7 @@ public:
                 size_t const alz_block_size = std::min(alz_block_size_max, size_t(alz_block_ratio * memory));
                 
                 // first coarse estimation of the required sampling to be able to do anything
-                size_t const alz_initial_sampling = std::max(double(alz_min_sampling), std::ceil(1.0 + std::log2(double(n * sizeof_metachar) / double(memory - alz_block_size))));
+                size_t const alz_initial_sampling = std::max(double(alz_min_sampling), std::ceil(2.0 + std::log2(double(n * sizeof_metachar) / double(memory - alz_block_size))));
                 size_t alz_sampling = alz_initial_sampling;
                 if(alz_sampling <= alz_max_sampling) {
                     std::cout << "alz<" << (use_64bit ? "64" : "32") << "> -s " << alz_sampling << " -l " << alz_fp_window << " -w " << alz_block_size << " ..." << std::endl;
@@ -107,12 +107,14 @@ public:
                                     precompress = false;
                                 }
 
+                                /*
                                 if(alz_sampling == alz_initial_sampling - 1) {
                                     // don't waste time on shoving off a sub-percent in precompression
                                     std::cout << "\tnot retrying with -s " << alz_sampling << " by heuristic" << std::endl;
                                     alz_sampling = alz_initial_sampling;
                                     precompress = true;
                                 }
+                                */
 
                                 if(!precompress) {
                                     if(alz_sampling > alz_max_sampling) {
