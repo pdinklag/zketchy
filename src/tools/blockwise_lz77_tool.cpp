@@ -23,6 +23,9 @@ private:
     static constexpr zk::internal::TokenType TOK_LITERAL = 0;
     static constexpr zk::internal::TokenType TOK_REF_LEN = 1;
     static constexpr zk::internal::TokenType TOK_REF_SRC = 2;
+    static constexpr zk::internal::TokenType TOK_FACT_REMAINDER = 3;
+
+    static constexpr size_t MAX_LZ_REF_LEN = 255;
 
     static void setup_encoding(zk::internal::BlockEncodingBase& enc, size_t const n) {
         enc.register_binary(255, false); // TOK_FACT_LITERAL
@@ -72,7 +75,12 @@ public:
 
                 while(in) {
                     ++z;
-                    auto const len = dec.read_uint(TOK_REF_LEN);
+                    auto len = dec.read_uint(TOK_REF_LEN);
+                    if(len == MAX_LZ_REF_LEN) {
+                        // this factor may be even longer, decode remainder
+                        len += dec.read_uint(TOK_FACT_REMAINDER);
+                    }
+
                     if(len == 0) {
                         s.push_back(dec.read_char(TOK_LITERAL));
                     } else {
@@ -129,7 +137,14 @@ public:
                                 enc.write_char(TOK_LITERAL, f.literal());
                             }, [&](lz77::Factor f){
                                 ++factors_total;
-                                enc.write_uint(TOK_REF_LEN, f.len);
+                                if(f.len >= MAX_LZ_REF_LEN) {
+                                    // encode the maximum length, then encode the rest as a special token
+                                    enc.write_uint(TOK_REF_LEN, MAX_LZ_REF_LEN);
+                                    enc.write_uint(TOK_FACT_REMAINDER, f.len - MAX_LZ_REF_LEN);
+                                } else {
+                                    // simply encode the length
+                                    enc.write_uint(TOK_REF_LEN, f.len);
+                                }
                                 enc.write_uint(TOK_REF_SRC, f.src);
                             }
                         );
