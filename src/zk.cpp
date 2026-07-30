@@ -118,7 +118,7 @@ public:
 
                                 if(!precompress) {
                                     if(alz_sampling > alz_max_sampling) {
-                                        std::cout << "\tmemory limit too low" << std::endl;
+                                        std::cout << "\tmemory limit too low (adjusted sampling rate would be " << alz_sampling << ")" << std::endl;
                                     } else {
                                         double est_mem_ratio = double(est_mem) / double(memory);
                                         std::cout << "\tretrying with -s " << alz_sampling << " -> est_mem=" << est_mem << " (" << 100.0 * est_mem_ratio << "% of limit) ..." << std::endl;
@@ -188,7 +188,7 @@ public:
                     }
                 } else {
                     precompress = false;
-                    std::cout << "skipping precompression -- memory limit too low (sampling rate would have to be " << alz_sampling << ")" << std::endl;
+                    std::cout << "skipping precompression -- memory limit too low (initial sampling rate would be " << alz_sampling << ")" << std::endl;
                 }
             }
 
