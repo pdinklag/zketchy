@@ -31,6 +31,7 @@ private:
         enc.register_binary(255, false); // TOK_FACT_LITERAL
         enc.register_huffman();          // TOK_FACT_LEN
         enc.register_binary(n, false);   // TOK_REF_SRC
+        enc.register_binary(n, false);   // TOK_FACT_REMAINDER
     }
 
     std::string filename;
