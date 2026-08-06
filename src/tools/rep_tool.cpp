@@ -34,7 +34,7 @@ public:
             size_t hist[256];
             for(size_t c = 0; c < 256; c++) hist[c] = 0;
 
-            for(size_t i = 0; i < n; i++) ++hist[size_t(s[i])];
+            for(size_t i = 0; i < n; i++) ++hist[uint8_t(s[i])];
 
             for(size_t c = 0; c < 256; c++) {
                 auto const nc = hist[c];
