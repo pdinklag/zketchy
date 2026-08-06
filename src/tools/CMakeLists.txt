@@ -14,6 +14,10 @@ add_executable(lz78-lru-tool lz78_lru_tool.cpp)
 target_link_libraries(lz78-lru-tool cmdline code iopp pm-malloc)
 set_target_properties(lz78-lru-tool PROPERTIES OUTPUT_NAME "lz78-lru")
 
+add_executable(rep-tool rep_tool.cpp)
+target_link_libraries(rep-tool cmdline code iopp lz77 pm-malloc)
+set_target_properties(rep-tool PROPERTIES OUTPUT_NAME "rep")
+
 add_executable(topk-lz77-tool topk_lz77_tool.cpp)
 target_link_libraries(topk-lz77-tool zk-topk-lz77 cmdline)
 set_target_properties(topk-lz77-tool PROPERTIES OUTPUT_NAME "topk-lz77")
