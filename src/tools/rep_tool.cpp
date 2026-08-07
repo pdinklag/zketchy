@@ -59,11 +59,11 @@ public:
         size_t r = 0;
         {
             auto bwt = [&](size_t const i){
-                auto const j = sa[i];
-                return j > 0 ? s[j-1] : s[n-1];
+                auto const sa_i = sa[i];
+                return sa_i ? s[sa_i-1] : sa[n-1];
             };
             
-            uint8_t last = bwt(0);
+            auto last = bwt(0);
             for(size_t i = 1; i < n; i++) {
                 auto const c = bwt(i);
                 if(last != 0 && c != last) ++r;
@@ -121,6 +121,7 @@ public:
         double delta = 0;
         {
             auto dk = std::make_unique<uint32_t[]>(n);
+            // dk[1] = 1; -- we do not need this, because we do not have an explicit sentinel
             for(size_t i = 1; i < n; i++) {
                 dk[lcp[i]+1]++;
                 if(dk[lcp[i+1]] == UINT32_MAX) {
