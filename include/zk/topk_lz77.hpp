@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <alz/approximate_lz77.hpp>
 #include <lz77/kkp2_factorizer.hpp>
 
@@ -36,10 +37,9 @@ private:
     }
     
     static constexpr size_t MAX_LZ_REF_LEN = 255;
-    static constexpr size_t MAX_WINDOW_SIZE = 2'147'483'647;
+    static constexpr size_t WINDOW_64BIT = 1ULL << 31;
 
-    using Index = uint32_t;
-    using Node = Index;
+    using Node = uint32_t; // k must be a 32-bit value
     using Topk = internal::TopKPrefixesMisraGries<>;
 
     size_t k_;
@@ -51,6 +51,7 @@ private:
 
     internal::Result result_;
 
+    template<typename Index>
     struct LZRef {
         Index pos, src, len;
         Index end() const { return pos + len - 1; }
@@ -61,15 +62,11 @@ private:
 public:
     TopkLZ77(size_t const k, size_t const window_size, size_t const max_freq, size_t const lz_sampling, size_t const lz_phrase_suffixes, size_t const block_size)
         : k_(k),
-          window_size_(std::min(window_size, MAX_WINDOW_SIZE)),
+          window_size_(window_size),
           max_freq_(max_freq),
           lz_sampling_(lz_sampling),
           lz_phrase_suffixes_(lz_phrase_suffixes),
           block_size_(block_size) {
-        
-        if(window_size > MAX_WINDOW_SIZE) {
-            std::cerr << "window size clamped to maximum value of " << MAX_WINDOW_SIZE << std::endl;
-        }
     }
 
     TopkLZ77(TopkLZ77&&) = default;
@@ -77,7 +74,14 @@ public:
     TopkLZ77(TopkLZ77 const&) = default;
     TopkLZ77& operator=(TopkLZ77 const&) = default;
 
+public:
     template<iopp::STLInputStreamLike InputStream, iopp::BitSink Out>
+    size_t compress(InputStream& in, Out&& out) {
+        return window_size_ >= WINDOW_64BIT ? compress<uint64_t>(in, std::move(out)) : compress<uint32_t>(in, std::move(out));
+    }
+
+private:
+    template<typename Index, iopp::STLInputStreamLike InputStream, iopp::BitSink Out>
     size_t compress(InputStream& in, Out out) {
         // init stats
         internal::MemoryTimePhase stats("topk-lz77");
@@ -110,7 +114,7 @@ public:
         Topk topk(k_ - 1, max_freq_);
 
         // initialize factorizer
-        std::vector<LZRef> lz_refs;
+        std::vector<LZRef<Index>> lz_refs;
 
         // initialize buffers
         size_t block_offs = 0;
@@ -295,6 +299,7 @@ public:
         return num_lz + num_literal + num_trie;
     }
 
+public:
     template<iopp::BitSource In, iopp::STLOutputStreamLike OutputStream>
     static void decompress(In in, OutputStream& out) {
         // decode header
