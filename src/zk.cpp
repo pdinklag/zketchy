@@ -198,21 +198,26 @@ public:
             
             // topk-lz77
             {
-                static constexpr size_t topk_lz_sampling_weak = 4;
-                static constexpr size_t topk_lz_sampling_strong = 0;
                 static constexpr size_t topk_bytes_per_k = 58;
-                static constexpr double topk_bytes_per_w_weak = 3.75;
-                static constexpr double topk_bytes_per_w_strong = 12;
-                static constexpr size_t topk_window_max = 2_Gi - 1; // nb: never go beyond 31-bit
+                static constexpr size_t max_k = 1ULL << 24;
+                static constexpr double topk_bytes_per_w_32bit = 12;
+                static constexpr double topk_bytes_per_w_64bit = 17;
+                static constexpr size_t topk_window_max_32bit = 2_Gi - 1;
+                static constexpr size_t fmax = 1'000'000;
+
+                static constexpr size_t sampling = 0; // no sampling
 
                 auto const tmp_n = std::filesystem::file_size(tmp_filename);
-                double const mem_window = topk_lz77_window_ratio * double(memory);
-                size_t const sampling = topk_lz_sampling_strong;
-                double const topk_bytes_per_w = topk_bytes_per_w_strong;
-                size_t const w = std::min(tmp_n, std::min(topk_window_max, size_t(mem_window / topk_bytes_per_w)));
-                size_t const k = size_t(double(memory - w * topk_bytes_per_w) / double(topk_bytes_per_k));
+                double const mem_trie = (1.0 - topk_lz77_window_ratio) * double(memory);
+                size_t const k = std::min(max_k, size_t(mem_trie / topk_bytes_per_k));
 
-                std::cout << "topk-lz77 (k=" << k << ", w=" << w << ", s=" << sampling << ") ... " << std::endl;
+                double const mem_window = double(memory) - k * topk_bytes_per_k;
+                size_t const w = std::min(std::max(
+                    std::min(size_t(mem_window / topk_bytes_per_w_32bit), topk_window_max_32bit),
+                    size_t(mem_window / topk_bytes_per_w_64bit)
+                ), tmp_n);
+
+                std::cout << "topk-lz77 (k=" << k << ", w=" << w << ") ... " << std::endl;
 
                 zk::internal::MemoryTimePhase phase;
                 auto const out_filename = filename + ".zk";
@@ -222,7 +227,7 @@ public:
                     in = iopp::FileInputStream(tmp_filename);
                     iopp::FileOutputStream fout(out_filename);
                     
-                    zk::TopkLZ77 topk_lz77(k, w, 1_Ki, sampling, 1, 32_Ki);
+                    zk::TopkLZ77 topk_lz77(k, w, fmax, sampling, 1, 32_Ki);
                     z = topk_lz77.compress(in, iopp::bitwise_output_to(fout));
                 }
                 phase.stop();
