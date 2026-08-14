@@ -45,6 +45,7 @@ public:
             zk::TopkLZ77::decompress(iopp::bitwise_input_from(in), out);
         } else {
             size_t const n = std::min(std::filesystem::file_size(filename), prefix);
+            window_size = std::min(window_size, n);
 
             if(output_filename.empty()) {
                 output_filename = filename + ".topklz77";
