@@ -23,6 +23,7 @@ private:
     double topk_lz77_window_ratio = 0.75;
     bool disable_precompression = false;
     bool decompress = false;
+    bool fast = false;
 
 public:
     ZK() : cmdline::Program("zketchy compression utility", "Compresses the input") {
@@ -33,6 +34,7 @@ public:
         option('x', "alz-block-ratio", alz_block_ratio, "The ratio of memory to use for the blocks in alz.");
         option('y', "topk-lz77-window-ratio", topk_lz77_window_ratio, "The ratio of memory to use for the window in topk-lz77.");
         option("disable-precompression", disable_precompression, "Completely disable precompression.");
+        option("fast", fast, "Fast mode (with potentially worse compression).");
     }
 
     virtual int main() override {
@@ -205,7 +207,7 @@ public:
                 static constexpr size_t topk_window_max_32bit = 2_Gi - 1;
                 static constexpr size_t fmax = 1'000'000;
 
-                static constexpr size_t sampling = 0; // no sampling
+                size_t const sampling = fast ? 3 : 0; // no sampling
 
                 auto const tmp_n = std::filesystem::file_size(tmp_filename);
                 double const mem_trie = (1.0 - topk_lz77_window_ratio) * double(memory);
@@ -217,7 +219,7 @@ public:
                     size_t(mem_window / topk_bytes_per_w_64bit)
                 ), tmp_n);
 
-                std::cout << "topk-lz77 (k=" << k << ", w=" << w << ") ... " << std::endl;
+                std::cout << "topk-lz77 (k=" << k << ", w=" << w << ", s=" << sampling << ") ... " << std::endl;
 
                 zk::internal::MemoryTimePhase phase;
                 auto const out_filename = filename + ".zk";

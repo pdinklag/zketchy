@@ -150,7 +150,7 @@ private:
                     };
 
                     if(lz_sampling_ > 0) {
-                        alz::ApproximateLZ77<Index> alz(lz_sampling_, 16);
+                        alz::ApproximateLZ77<Index> alz(lz_sampling_, 10);
                         alz.factorize(block.get(), block.get() + block_num, emit_literal, emit_ref);
                     } else {
                         lz77::KKP2Factorizer lz77;
