@@ -207,7 +207,7 @@ public:
                 static constexpr size_t topk_window_max_32bit = 2_Gi - 1;
                 static constexpr size_t fmax = 1'000'000;
 
-                size_t const sampling = fast ? 3 : 0; // no sampling
+                size_t const sampling = fast ? 4 : 0; // no sampling
 
                 auto const tmp_n = std::filesystem::file_size(tmp_filename);
                 double const mem_trie = (1.0 - topk_lz77_window_ratio) * double(memory);
