@@ -55,7 +55,7 @@ public:
             auto tmp_filename = filename + ".zk_tmp";
             if(!disable_precompression) {
                 constexpr size_t alz_min_sampling = 6;
-                constexpr size_t alz_max_sampling = 10;
+                constexpr size_t alz_max_sampling = 12;
                 constexpr size_t const alz_fp_window = 10;
                 constexpr size_t const alz_block_size_max = 16 * 1024 * 1024;
                 size_t const alz_memory_headroom = size_t(0.8 * memory);
@@ -93,21 +93,22 @@ public:
                             if(card_ratio <= alz_threshold) {
                                 precompress = true;
 
-                                while(estimate_memory(parsing*2, card/2) < alz_memory_headroom && alz_sampling > alz_min_sampling) {
+                                auto const prev_sampling = alz_sampling;
+                                while(estimate_memory(parsing*2, card*2) < alz_memory_headroom && alz_sampling > 0) {
                                     --alz_sampling;
-                                    card /= 2;
+                                    card *= 2;
                                     parsing *= 2;
                                     est_mem = estimate_memory(parsing, card);
-                                    precompress = false;
                                 }
 
-                                while(est_mem > alz_memory_headroom && alz_sampling <= alz_max_sampling) {
+                                while(est_mem > alz_memory_headroom) {
                                     ++alz_sampling;
-                                    card *= 2;
+                                    card /= 2;
                                     parsing /= 2;
                                     est_mem = estimate_memory(parsing, card);
-                                    precompress = false;
                                 }
+
+                                precompress = (alz_sampling == prev_sampling);
 
                                 /*
                                 if(alz_sampling == alz_initial_sampling - 1) {
