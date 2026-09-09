@@ -10,6 +10,7 @@ project(zketchy)
 
 # options
 option(BENCHMARK "Compile performance benchmarking and statistics output" OFF)
+option(BUILD_TOOLS "Build extra tools, mainly used for development and diagnostics" OFF)
 
 # include CMake modules
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmakemodules")
