@@ -9,4 +9,5 @@ if(${BUILD_TOOLS})
 endif()
 
 add_executable(zk zk.cpp)
+target_compile_definitions(zk PUBLIC ALZ_CARDINALITY_CALLBACK_ENABLED)
 target_link_libraries(zk alz zk-topk-lz77 cmdline)
