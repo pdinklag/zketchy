@@ -44,7 +44,7 @@ CPMAddPackage("gh:pdinklag/iopp#v1.0.1")
 CPMAddPackage("gh:pdinklag/pm#v1.0.1")
 
 CPMAddPackage("gh:pdinklag/lz77#v1.0.4")
-CPMAddPackage("gh:pdinklag/alz#v1.1.0")
+CPMAddPackage("gh:pdinklag/alz#v1.2.0")
 
 # include
 include_directories(${CMAKE_SOURCE_DIR}/include)

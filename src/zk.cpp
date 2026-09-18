@@ -181,10 +181,10 @@ public:
                         // attempt #1
                         if(use_64bit) {
                             // 64-bit
-                            run_alz(alz::ApproximateLZ77<uint64_t>(alz_sampling, alz_fp_window), true);
+                            run_alz(alz::ApproximateLZ77<uint64_t, true>(alz_sampling, alz_fp_window), true);
                         } else {
                             // 32-bit
-                            run_alz(alz::ApproximateLZ77<uint32_t>(alz_sampling, alz_fp_window), true);
+                            run_alz(alz::ApproximateLZ77<uint32_t, true>(alz_sampling, alz_fp_window), true);
                         }
 
                         if(!precompress && alz_sampling != alz_initial_sampling && alz_sampling <= alz_max_sampling) {
@@ -192,10 +192,10 @@ public:
                             in.seekg(0, std::ios::beg);
                             if(use_64bit) {
                                 // 64-bit
-                                run_alz(alz::ApproximateLZ77<uint64_t>(alz_sampling, alz_fp_window), false);
+                                run_alz(alz::ApproximateLZ77<uint64_t, false>(alz_sampling, alz_fp_window), false);
                             } else {
                                 // 32-bit
-                                run_alz(alz::ApproximateLZ77<uint32_t>(alz_sampling, alz_fp_window), false);
+                                run_alz(alz::ApproximateLZ77<uint32_t, false>(alz_sampling, alz_fp_window), false);
                             }
                             precompress = true;
                         }
